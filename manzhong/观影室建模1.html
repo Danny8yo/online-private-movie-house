@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>线上观影厅 - 观影室</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+        }
+
+        body {
+            background-color: #050505;
+            color: #e5e7eb;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* 顶部导航栏 */
+        header {
+            background-color: #1a1a1a;
+            color: #ffcc80;
+            padding: 15px 0;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #333;
+        }
+
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        .logo {
+            font-size: 24px;
+            font-weight: bold;
+            color: #ff9a00;
+        }
+
+        .nav-menu {
+            display: flex;
+            gap: 30px;
+        }
+
+        .nav-menu a {
+            color: #ffcc80;
+            text-decoration: none;
+            padding: 8px 15px;
+            border-radius: 4px;
+            transition: all 0.3s;
+            font-size: 16px;
+        }
+
+        .nav-menu a:hover {
+            background-color: rgba(255, 154, 0, 0.2);
+            color: #ffb74d;
+        }
+
+        .nav-menu a.active {
+            background-color: #ff9a00;
+            color: #1a1a1a;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .user-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background-color: #ff9a00;
+            color: #1a1a1a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+
+        /* 房间信息区域 */
+        .room-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #333;
+        }
+
+        .room-name {
+            font-size: 24px;
+            font-weight: bold;
+            color: #ff9a00;
+        }
+
+        .room-code {
+            color: #888;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+
+        .user-role-badge {
+            font-size: 14px;
+            background-color: #ff6b6b;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+        }
+
+        .user-role-badge.user {
+            background-color: #00a1d6;
+        }
+
+        /* 视频源信息 */
+        .video-source-info {
+            background-color: #121212;
+            padding: 12px 20px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            font-size: 16px;
+            color: #ffcc80;
+            border-left: 4px solid #ff9a00;
+        }
+
+        /* 视频播放区域 */
+        .video-container {
+            width: 100%;
+            background-color: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 20px;
+            position: relative;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+        }
+
+        .video-player {
+            width: 100%;
+            height: 500px;
+            background: linear-gradient(45deg, #1a1a2e, #16213e);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 24px;
+            position: relative;
+        }
+
+        /* 弹幕容器 */
+        .danmu-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            overflow: hidden;
+            z-index: 10;
+        }
+
+        .danmu {
+            position: absolute;
+            white-space: nowrap;
+            color: white;
+            text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.8);
+            font-size: 18px;
+            font-weight: bold;
+            animation: danmuMove linear;
+            opacity: 0.9;
+        }
+
+        @keyframes danmuMove {
+            from {
+                transform: translateX(100%);
+            }
+            to {
+                transform: translateX(-100%);
+            }
+        }
+
+        /* 弹幕控制区域 */
+        .danmu-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            background-color: #121212;
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        .danmu-toggle {
+            padding: 10px 20px;
+            background-color: #ff9a00;
+            border: none;
+            border-radius: 4px;
+            color: #1a1a1a;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .danmu-input {
+            flex: 1;
+            padding: 10px 15px;
+            border: 1px solid #333;
+            border-radius: 4px;
+            background-color: #1a1a1a;
+            color: white;
+        }
+
+        .danmu-send {
+            padding: 10px 20px;
+            background-color: #ff6b6b;
+            border: none;
+            border-radius: 4px;
+            color: white;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        /* 视频控制栏 */
+        .video-controls {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px;
+            background-color: rgba(0, 0, 0, 0.85);
+            color: white;
+        }
+
+        .controls-left, .controls-right {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .control-btn {
+            background: transparent;
+            border: none;
+            color: white;
+            cursor: pointer;
+            font-size: 16px;
+            padding: 8px 12px;
+            border-radius: 4px;
+            transition: background-color 0.3s;
+        }
+
+        .control-btn:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .control-btn.admin-only {
+            background-color: rgba(255, 107, 107, 0.3);
+        }
+
+        .control-btn.admin-only:hover {
+            background-color: rgba(255, 107, 107, 0.5);
+        }
+
+        .progress-container {
+            flex: 1;
+            height: 5px;
+            background-color: #444;
+            border-radius: 3px;
+            margin: 0 15px;
+            position: relative;
+            cursor: pointer;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background-color: #ff9a00;
+            border-radius: 3px;
+            width: 30%;
+        }
+
+        .time-display {
+            display: flex;
+            justify-content: space-between;
+            color: #888;
+            font-size: 12px;
+            margin-top: 5px;
+        }
+
+        /* 房间内容区域 */
+        .room-content {
+            display: flex;
+            gap: 20px;
+        }
+
+        .user-list-container, .chat-container {
+            flex: 1;
+            background-color: #121212;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        .section-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #ff9a00;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #333;
+        }
+
+        .user-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .user-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #333;
+        }
+
+        .user-item:last-child {
+            border-bottom: none;
+        }
+
+        .chat-area {
+            height: 250px;
+            overflow-y: auto;
+            margin-bottom: 15px;
+            padding: 10px;
+            background-color: #1a1a1a;
+            border-radius: 4px;
+            border: 1px solid #333;
+        }
+
+        .chat-message {
+            margin-bottom: 10px;
+            padding: 10px;
+            background-color: #252525;
+            border-radius: 4px;
+            border-left: 3px solid #ff9a00;
+        }
+
+        .chat-input {
+            display: flex;
+            gap: 10px;
+        }
+
+        .chat-input input {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #333;
+            border-radius: 4px;
+            background-color: #1a1a1a;
+            color: white;
+        }
+
+        .chat-input button {
+            padding: 12px 25px;
+            background-color: #ff9a00;
+            border: none;
+            border-radius: 4px;
+            color: #1a1a1a;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        /* 权限说明区域 */
+        .permission-info {
+            margin-top: 30px;
+            background-color: #121212;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        /* 同步状态指示器 */
+        .sync-status {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 12px;
+            color: #4CAF50;
+            margin-top: 5px;
+        }
+
+        .sync-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #4CAF50;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .room-content {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+<header>
+    <div class="header-content">
+        <div class="logo">线上观影厅</div>
+        <div class="nav-menu">
+            <a href="lobby.html">观影大厅</a>
+            <a href="#" class="active">观影室</a>
+            <a href="#" id="leave-room-btn">离开房间</a>
+        </div>
+        <div class="user-info">
+            <span id="username">用户名</span>
+            <div class="user-avatar" id="user-avatar">用</div>
+        </div>
+    </div>
+</header>
+
+<div class="container">
+    <div class="room-header">
+        <div>
+            <div class="room-name" id="current-room-name">示例观影室</div>
+            <div class="room-code">房间码: <span id="current-room-code">ABCD1234</span></div>
+        </div>
+        <div class="user-role-badge" id="current-user-role">观众</div>
+    </div>
+
+    <!-- 视频源信息 -->
+    <div class="video-source-info">
+        当前视频源: <span id="current-video-source">示例电影.mp4</span>
+        <div class="sync-status" id="sync-status">
+            <div class="sync-indicator"></div>
+            <span>同步中...</span>
+        </div>
+    </div>
+
+    <!-- 视频播放区域 -->
+    <div class="video-container">
+        <div class="video-player">
+            <div>电影播放区域</div>
+            <div class="danmu-container" id="danmu-container"></div>
+        </div>
+        <div class="video-controls">
+            <div class="controls-left">
+                <button class="control-btn" id="play-pause">▶ 播放/暂停</button>
+                <button class="control-btn">清晰度</button>
+                <button class="control-btn">音量</button>
+            </div>
+            <div class="progress-container" id="progress-container">
+                <div class="progress-bar" id="progress-bar"></div>
+            </div>
+            <div class="controls-right">
+                <button class="control-btn admin-only" id="change-video">更换视频源</button>
+                <button class="control-btn admin-only" id="change-subtitle">更换字幕</button>
+                <button class="control-btn admin-only" id="upload-video">上传视频</button>
+            </div>
+        </div>
+        <div class="time-display">
+            <span id="current-time">00:00</span>
+            <span id="duration">00:00</span>
+        </div>
+    </div>
+
+    <!-- 弹幕控制区域 -->
+    <div class="danmu-controls">
+        <button class="danmu-toggle" id="toggle-danmu">开启弹幕</button>
+        <input type="text" class="danmu-input" id="danmu-input" placeholder="输入弹幕内容...">
+        <button class="danmu-send" id="send-danmu">发送弹幕</button>
+    </div>
+
+    <div class="room-content">
+        <div class="user-list-container">
+            <h3 class="section-title">用户列表</h3>
+            <div class="user-list" id="user-list">
+                <!-- 用户列表将通过JS动态生成 -->
+            </div>
+        </div>
+
+        <div class="chat-container">
+            <h3 class="section-title">聊天区域</h3>
+            <div class="chat-area" id="chat-area">
+                <!-- 聊天消息将通过JS动态生成 -->
+            </div>
+            <div class="chat-input">
+                <input type="text" placeholder="输入聊天消息..." id="chat-input">
+                <button id="send-message">发送</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="permission-info">
+        <h3 class="section-title">权限说明</h3>
+        <div class="permission-item">
+            <div class="user-role-badge user"></div>
+            <div>观众权限：同步观看、调节音量、发送消息、查看用户列表、离开房间</div>
+        </div>
+        <div class="permission-item">
+            <div class="user-role-badge admin"></div>
+            <div>管理员权限：更换视频、调整进度、踢人、提拔管理员、解散房间</div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // 从本地存储获取房间和用户信息
+        const roomData = JSON.parse(localStorage.getItem('currentRoom'));
+        const userData = JSON.parse(localStorage.getItem('currentUser'));
+
+        // 视频同步状态
+        let videoState = {
+            playing: false,
+            currentTime: 0,
+            duration: 3600, // 60分钟视频
+            videoSrc: '示例电影.mp4',
+            lastSync: Date.now()
+        };
+
+        // 从本地存储加载视频状态
+        const savedVideoState = localStorage.getItem('videoState_' + (roomData ? roomData.id : 'default'));
+        if (savedVideoState) {
+            videoState = { ...videoState, ...JSON.parse(savedVideoState) };
+        }
+
+        // 初始化房间信息
+        if (roomData) {
+            document.getElementById('current-room-name').textContent = roomData.name;
+            document.getElementById('current-room-code').textContent = roomData.code;
+            document.getElementById('current-video-source').textContent = roomData.movie;
+        }
+
+        // 初始化用户信息
+        if (userData) {
+            document.getElementById('username').textContent = userData.name;
+            document.getElementById('user-avatar').textContent = userData.name.charAt(0);
+
+            // 设置用户角色
+            const roleBadge = document.getElementById('current-user-role');
+            roleBadge.textContent = userData.role === 'admin' ? '管理员' : '观众';
+            roleBadge.className = userData.role === 'admin' ? 'user-role-badge' : 'user-role-badge user';
+
+            // 显示/隐藏管理员按钮
+            const adminButtons = document.querySelectorAll('.admin-only');
+            adminButtons.forEach(btn => {
+                btn.style.display = userData.role === 'admin' ? 'block' : 'none';
+            });
+        }
+
+        // 初始化用户列表
+        const sampleUsers = [
+            { name: "用户A", role: "admin" },
+            { name: "用户B", role: "user" },
+            { name: "用户C", role: "user" },
+            { name: "用户D", role: "user" },
+            { name: "用户E", role: "user" }
+        ];
+
+        const userList = document.getElementById('user-list');
+        sampleUsers.forEach(user => {
+            const userItem = document.createElement('div');
+            userItem.className = 'user-item';
+            userItem.innerHTML = `
+                    <div>${user.name}</div>
+                    <div class="user-role-badge ${user.role}">${user.role === 'admin' ? '管理员' : '观众'}</div>
+                `;
+            userList.appendChild(userItem);
+        });
+
+        // 初始化聊天功能
+        const chatArea = document.getElementById('chat-area');
+        const chatInput = document.getElementById('chat-input');
+        const sendBtn = document.getElementById('send-message');
+
+        const sampleMessages = [
+            { user: "系统", message: "欢迎来到观影室！", time: "10:00" },
+            { user: "用户A", message: "大家好！", time: "10:01" },
+            { user: "用户B", message: "这部电影很好看！", time: "10:05" }
+        ];
+
+        chatArea.innerHTML = '';
+
+        sampleMessages.forEach(msg => {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'chat-message';
+            messageDiv.innerHTML = `
+                    <div style="font-weight: bold;">${msg.user}</div>
+                    <div>${msg.message}</div>
+                    <div style="font-size: 12px; color: #888;">${msg.time}</div>
+                `;
+            chatArea.appendChild(messageDiv);
+        });
+
+        sendBtn.addEventListener('click', function() {
+            const message = chatInput.value.trim();
+            if (message) {
+                const username = userData ? userData.name : '匿名用户';
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'chat-message';
+                messageDiv.innerHTML = `
+                        <div style="font-weight: bold;">${username}</div>
+                        <div>${message}</div>
+                        <div style="font-size: 12px; color: #888;">刚刚</div>
+                    `;
+                chatArea.appendChild(messageDiv);
+                chatInput.value = '';
+                chatArea.scrollTop = chatArea.scrollHeight;
+            }
+        });
+
+        chatInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendBtn.click();
+            }
+        });
+
+        // 弹幕功能
+        const danmuContainer = document.getElementById('danmu-container');
+        const danmuInput = document.getElementById('danmu-input');
+        const sendDanmuBtn = document.getElementById('send-danmu');
+        const toggleDanmuBtn = document.getElementById('toggle-danmu');
+        let danmuEnabled = true;
+        let danmuInterval;
+
+        // 弹幕颜色选项
+        const danmuColors = [
+            '#ffffff', '#ff9a00', '#ff6b6b',
+            '#00a1d6', '#a6f6af', '#f0c929'
+        ];
+
+        // 随机生成弹幕
+        function generateRandomDanmu() {
+            if (!danmuEnabled) return;
+
+            const danmuTexts = [
+                "这部电影太棒了！",
+                "主角演技真好",
+                "这个镜头太震撼了",
+                "期待下一部",
+                "经典场景再现",
+                "666",
+                "太好看了",
+                "泪目了",
+                "神作！",
+                "二刷打卡"
+            ];
+
+            const danmuText = danmuTexts[Math.floor(Math.random() * danmuTexts.length)];
+            const color = danmuColors[Math.floor(Math.random() * danmuColors.length)];
+            const fontSize = Math.floor(Math.random() * 6) + 18;
+            const top = Math.random() * 80 + 10;
+            const duration = Math.random() * 10 + 5;
+
+            createDanmu(danmuText, color, fontSize, top, duration);
+        }
+
+        // 创建弹幕元素
+        function createDanmu(text, color, fontSize, top, duration) {
+            const danmu = document.createElement('div');
+            danmu.className = 'danmu';
+            danmu.textContent = text;
+            danmu.style.color = color;
+            danmu.style.fontSize = `${fontSize}px`;
+            danmu.style.top = `${top}%`;
+            danmu.style.animationDuration = `${duration}s`;
+
+            danmuContainer.appendChild(danmu);
+
+            // 动画结束后移除弹幕
+            danmu.addEventListener('animationend', function() {
+                danmu.remove();
+            });
+        }
+
+        // 发送弹幕
+        sendDanmuBtn.addEventListener('click', function() {
+            const danmuText = danmuInput.value.trim();
+            if (danmuText && danmuEnabled) {
+                const username = userData ? userData.name : '匿名用户';
+                const fullText = `${username}: ${danmuText}`;
+                const color = danmuColors[Math.floor(Math.random() * danmuColors.length)];
+                const fontSize = 20;
+                const top = Math.random() * 80 + 10;
+                const duration = Math.random() * 8 + 5;
+
+                createDanmu(fullText, color, fontSize, top, duration);
+                danmuInput.value = '';
+            }
+        });
+
+        // 切换弹幕显示
+        toggleDanmuBtn.addEventListener('click', function() {
+            danmuEnabled = !danmuEnabled;
+            toggleDanmuBtn.textContent = danmuEnabled ? '关闭弹幕' : '开启弹幕';
+
+            if (danmuEnabled) {
+                // 开启弹幕时启动随机生成
+                danmuInterval = setInterval(generateRandomDanmu, 2000);
+            } else {
+                // 关闭弹幕时停止生成
+                clearInterval(danmuInterval);
+            }
+        });
+
+        // 初始启动弹幕
+        toggleDanmuBtn.click();
+
+        // 视频播放控制
+        const playPauseBtn = document.getElementById('play-pause');
+        const progressBar = document.getElementById('progress-bar');
+        const progressContainer = document.getElementById('progress-container');
+        const currentTimeDisplay = document.getElementById('current-time');
+        const durationDisplay = document.getElementById('duration');
+        const syncStatus = document.getElementById('sync-status');
+
+        let isPlaying = videoState.playing;
+        let currentTime = videoState.currentTime;
+        let videoInterval;
+
+        // 格式化时间为 MM:SS
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        // 更新进度条显示
+        function updateProgress() {
+            const progressPercent = (currentTime / videoState.duration) * 100;
+            progressBar.style.width = `${progressPercent}%`;
+            currentTimeDisplay.textContent = formatTime(currentTime);
+            durationDisplay.textContent = formatTime(videoState.duration);
+
+            // 更新播放按钮状态
+            playPauseBtn.textContent = isPlaying ? '❚❚ 暂停' : '▶ 播放';
+        }
+
+        // 点击进度条跳转
+        progressContainer.addEventListener('click', function(e) {
+            if (userData && userData.role !== 'admin') {
+                alert('只有管理员可以调整播放进度');
+                return;
+            }
+
+            const rect = this.getBoundingClientRect();
+            const clickPosition = e.clientX - rect.left;
+            const percent = clickPosition / rect.width;
+            currentTime = videoState.duration * percent;
+
+            // 同步到其他用户
+            syncVideoState();
+            updateProgress();
+        });
+
+        // 播放/暂停按钮点击事件
+        playPauseBtn.addEventListener('click', function() {
+            if (userData && userData.role !== 'admin') {
+                alert('只有管理员可以控制播放');
+                return;
+            }
+
+            isPlaying = !isPlaying;
+
+            if (isPlaying) {
+                // 模拟视频播放
+                videoInterval = setInterval(function() {
+                    if (currentTime < videoState.duration) {
+                        currentTime += 1;
+                        updateProgress();
+                    } else {
+                        // 视频结束
+                        clearInterval(videoInterval);
+                        isPlaying = false;
+                        updateProgress();
+                    }
+                }, 1000);
+            } else {
+                clearInterval(videoInterval);
+            }
+
+            // 同步到其他用户
+            syncVideoState();
+            updateProgress();
+        });
+
+        // 同步视频状态到其他用户
+        function syncVideoState() {
+            videoState.playing = isPlaying;
+            videoState.currentTime = currentTime;
+            videoState.lastSync = Date.now();
+
+            // 保存到本地存储（模拟服务器同步）
+            localStorage.setItem('videoState_' + (roomData ? roomData.id : 'default'), JSON.stringify(videoState));
+
+            // 显示同步状态
+            syncStatus.innerHTML = '<div class="sync-indicator"></div><span>已同步</span>';
+            setTimeout(() => {
+                syncStatus.innerHTML = '<div class="sync-indicator"></div><span>同步中...</span>';
+            }, 2000);
+        }
+
+        // 检查同步状态
+        function checkSyncStatus() {
+            const savedVideoState = localStorage.getItem('videoState_' + (roomData ? roomData.id : 'default'));
+            if (savedVideoState) {
+                const remoteState = JSON.parse(savedVideoState);
+
+                // 如果远程状态比本地新，则同步
+                if (remoteState.lastSync > videoState.lastSync) {
+                    videoState = remoteState;
+                    isPlaying = videoState.playing;
+                    currentTime = videoState.currentTime;
+
+                    // 更新播放状态
+                    if (isPlaying && !videoInterval) {
+                        videoInterval = setInterval(function() {
+                            if (currentTime < videoState.duration) {
+                                currentTime += 1;
+                                updateProgress();
+                            } else {
+                                clearInterval(videoInterval);
+                                isPlaying = false;
+                                updateProgress();
+                            }
+                        }, 1000);
+                    } else if (!isPlaying && videoInterval) {
+                        clearInterval(videoInterval);
+                    }
+
+                    updateProgress();
+                }
+            }
+        }
+
+        // 定期检查同步状态
+        setInterval(checkSyncStatus, 3000);
+
+        // 初始化显示
+        updateProgress();
+
+        // 更换视频源按钮
+        document.getElementById('change-video').addEventListener('click', function() {
+            if (userData && userData.role === 'admin') {
+                const newVideo = prompt('请输入新的视频源URL:');
+                if (newVideo) {
+                    videoState.videoSrc = newVideo;
+                    videoState.currentTime = 0;
+                    isPlaying = false;
+                    clearInterval(videoInterval);
+
+                    document.getElementById('current-video-source').textContent = newVideo;
+                    syncVideoState();
+                    updateProgress();
+                    alert('视频源已更换，已同步到所有用户');
+                }
+            } else {
+                alert('此功能需要管理员权限');
+            }
+        });
+
+        // 更换字幕按钮
+        document.getElementById('change-subtitle').addEventListener('click', function() {
+            if (userData && userData.role === 'admin') {
+                alert('更换字幕功能');
+            } else {
+                alert('此功能需要管理员权限');
+            }
+        });
+
+        // 上传视频按钮
+        document.getElementById('upload-video').addEventListener('click', function() {
+            if (userData && userData.role === 'admin') {
+                alert('上传视频功能');
+            } else {
+                alert('此功能需要管理员权限');
+            }
+        });
+
+        // 离开房间按钮
+        document.getElementById('leave-room-btn').addEventListener('click', function() {
+            if (confirm('确定要离开当前房间吗？')) {
+                localStorage.removeItem('currentRoom');
+                window.location.href = 'lobby.html';
+            }
+        });
+    });
+</script>
+</body>
+</html>
