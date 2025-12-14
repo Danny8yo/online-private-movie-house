@@ -16,8 +16,8 @@
         <mxCell id="bncD_JIws2DiQ85vyut7-5" parent="1" style="whiteSpace=wrap;strokeWidth=2;" value="《Control》&#xa;:MessageDispatcher" vertex="1">
           <mxGeometry height="50" width="133" x="1120" y="200" as="geometry" />
         </mxCell>
-        <mxCell id="bncD_JIws2DiQ85vyut7-6" parent="1" style="whiteSpace=wrap;strokeWidth=2;" value="《Entity》&#xa;:ChatRoom" vertex="1">
-          <mxGeometry height="54" width="227" x="1427" y="196" as="geometry" />
+        <mxCell id="bncD_JIws2DiQ85vyut7-6" parent="1" style="whiteSpace=wrap;strokeWidth=2;" value="《Entity》&#xa;:ScreeningRoom" vertex="1">
+          <mxGeometry height="54" width="227" x="1400" y="196" as="geometry" />
         </mxCell>
         <mxCell id="bncD_JIws2DiQ85vyut7-7" parent="1" style="whiteSpace=wrap;strokeWidth=2;" value="" vertex="1">
           <mxGeometry x="1487" y="148" as="geometry" />
@@ -71,7 +71,7 @@
             <Array as="points" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="bncD_JIws2DiQ85vyut7-20" edge="1" parent="1" source="bncD_JIws2DiQ85vyut7-5" style="curved=1;startArrow=none;endArrow=block;exitX=1;exitY=0.25;entryX=0;entryY=0.23;rounded=0;exitDx=0;exitDy=0;" target="bncD_JIws2DiQ85vyut7-6" value="6: getUserList()">
+        <mxCell id="bncD_JIws2DiQ85vyut7-20" edge="1" parent="1" source="bncD_JIws2DiQ85vyut7-5" style="curved=1;startArrow=none;endArrow=block;exitX=1;exitY=0.25;entryX=0;entryY=0.23;rounded=0;exitDx=0;exitDy=0;" target="bncD_JIws2DiQ85vyut7-6" value="6: getAudienceList()">
           <mxGeometry relative="1" as="geometry">
             <Array as="points" />
           </mxGeometry>
