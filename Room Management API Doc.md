@@ -64,6 +64,423 @@
 | 410 | ROOM_CLOSED | 房间已关闭 |
 | 500 | INTERNAL_SERVER_ERROR | 服务器内部错误 |
 
+
+
+## Socket.IO 实时接口（同步控制子系统）
+
+本章节描述在线观影室的**视频同步控制子系统**接口规范，基于 Socket.IO 实现。
+
+### 连接信息
+
+- **Socket 服务地址**：与 HTTP 服务同源（例如 `http://localhost:3000`）
+- **Namespace**：`/sync`
+- **Room Channel（服务器内部分组）**：`room:{roomId}`
+
+> 说明：同步控制强绑定房间，使用同步功能前必须先通过 REST API 加入房间（`POST /api/rooms/:roomId/join`）获取 `participantId`。只有房间创建者（creator）可以执行同步控制操作。
+
+### ACK（回执）格式
+
+所有客户端 → 服务端事件都使用 ACK（回调函数）作为统一的成功/失败返回，格式与聊天子系统相同。
+
+### 同步控制错误码
+
+| 错误码 | 说明 | 常见触发场景 |
+|--------|------|--------------|
+| VALIDATION_ERROR | 参数验证失败 | roomId/operatorId/progress/rate 缺失或非法 |
+| ROOM_NOT_FOUND | 房间不存在 | roomId 无效 |
+| ROOM_CLOSED | 房间已关闭 | 房间已解散/关闭 |
+| PERMISSION_DENIED | 权限不足 | 非房主尝试执行同步控制操作 |
+| INTERNAL_SERVER_ERROR | 服务器内部错误 | 未捕获异常 |
+
+---
+
+### 事件：加入同步频道
+
+客户端加入某个房间的同步控制频道（Socket.IO room），并获取当前视频状态。
+
+**事件名（Client → Server）**：`sync:join`
+
+**请求参数**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| roomId | string | 是 | 房间ID（6位房间号） |
+| participantId | string | 是 | 参与者ID（由加入房间 API 返回） |
+
+**ACK 返回 data**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| channel | string | 实际加入的 Socket room 名称（`room:{roomId}`） |
+| videoState | object | 当前视频状态（包含 source、status、progress、playbackRate、subtitle 等） |
+| serverTime | number | 服务端时间戳（毫秒） |
+
+---
+
+### 事件：初始化状态请求
+
+新加入房间的成员请求获取当前视频状态（与 `sync:join` 功能类似，但不需要加入频道）。
+
+**事件名（Client → Server）**：`sync:init`
+
+**请求参数**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| roomId | string | 是 | 房间ID |
+
+**ACK 返回 data**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| videoState | object | 当前视频状态 |
+| serverTime | number | 服务端时间戳（毫秒） |
+
+---
+
+### 事件：播放
+
+房间创建者发起播放操作，服务端更新视频状态并广播给房间内所有成员。
+
+**事件名（Client → Server）**：`sync:play`
+
+**请求参数**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| roomId | string | 是 | 房间ID |
+| operatorId | string | 是 | 操作者ID（必须是房间创建者） |
+
+**ACK 返回 data**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| event | object | 同步事件对象（见下方说明） |
+
+---
+
+### 事件：暂停
+
+房间创建者发起暂停操作，服务端更新视频状态并广播给房间内所有成员。
+
+**事件名（Client → Server）**：`sync:pause`
+
+**请求参数**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| roomId | string | 是 | 房间ID |
+| operatorId | string | 是 | 操作者ID（必须是房间创建者） |
+
+**ACK 返回 data**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| event | object | 同步事件对象 |
+
+---
+
+### 事件：跳转进度
+
+房间创建者发起进度跳转操作，服务端更新视频进度并广播给房间内所有成员。
+
+**事件名（Client → Server）**：`sync:seek`
+
+**请求参数**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| roomId | string | 是 | 房间ID |
+| operatorId | string | 是 | 操作者ID（必须是房间创建者） |
+| progress | number | 是 | 目标进度（秒），必须 >= 0 |
+
+**ACK 返回 data**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| event | object | 同步事件对象 |
+
+---
+
+### 事件：改变播放倍速
+
+房间创建者改变播放倍速，服务端更新倍速并广播给房间内所有成员。
+
+**事件名（Client → Server）**：`sync:changeRate`
+
+**请求参数**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| roomId | string | 是 | 房间ID |
+| operatorId | string | 是 | 操作者ID（必须是房间创建者） |
+| rate | number | 是 | 新的播放倍速，范围 0.25-4.0 |
+
+**ACK 返回 data**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| event | object | 同步事件对象 |
+
+---
+
+### 事件：改变字幕
+
+房间创建者改变字幕设置，服务端更新字幕并广播给房间内所有成员。
+
+**事件名（Client → Server）**：`sync:changeSubtitle`
+
+**请求参数**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| roomId | string | 是 | 房间ID |
+| operatorId | string | 是 | 操作者ID（必须是房间创建者） |
+| subtitle | string\|null | 是 | 字幕设置，null 表示关闭字幕 |
+
+**ACK 返回 data**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| event | object | 同步事件对象 |
+
+---
+
+### 事件：更换视频源
+
+房间创建者更换视频源，服务端更新视频源并广播给房间内所有成员。
+
+**事件名（Client → Server）**：`sync:changeSource`
+
+**请求参数**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| roomId | string | 是 | 房间ID |
+| operatorId | string | 是 | 操作者ID（必须是房间创建者） |
+| sourceUrl | string\|null | 是 | 新的视频源URL，null 表示清空视频源 |
+
+**ACK 返回 data**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| event | object | 同步事件对象 |
+
+---
+
+### 事件：接收同步事件（广播）
+
+服务端向房间内所有客户端广播同步事件。客户端收到此事件后，应强制对齐视频状态。
+
+**事件名（Server → Client）**：`sync:event`
+
+**消息体（SyncEvent）**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| type | string | 事件类型（CHANGE_SOURCE/PLAY/PAUSE/SEEK/CHANGE_RATE/CHANGE_SUBTITLE） |
+| roomId | string | 房间ID |
+| operatorId | string | 操作者ID |
+| serverTime | number | 服务端时间戳（毫秒） |
+| payload | object | 事件载荷，包含当前视频状态信息 |
+
+**payload 对象结构**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| source | string\|null | 视频源URL |
+| status | string | 播放状态（playing/paused/stopped） |
+| progress | number | 播放进度（秒） |
+| playbackRate | number | 播放倍速 |
+| subtitle | string\|null | 字幕设置 |
+
+---
+
+### 前端调用示例（Socket.IO 同步控制）
+
+> 以下展示同步控制模块的完整使用流程。
+> 
+> **重要提示**：
+> - 只有房间创建者（房主）可以执行同步控制操作（play、pause、seek等）
+> - 判断是否为房主：比较 `participantId` 是否等于房间详情中的 `creatorId`
+> - 房主在播放器中跳转进度时，需要监听播放器的 `seeked` 事件，自动触发 `sync:seek`
+> - 使用 `isSyncingSeek` 标志位防止同步事件循环触发
+
+```javascript
+import { io } from 'socket.io-client';
+
+// 1) 连接同步控制命名空间
+const syncSocket = io('http://localhost:3000/sync', {
+  transports: ['websocket']
+});
+
+// 2) 加入同步频道（必须先通过 REST API 加入房间获取 participantId）
+syncSocket.emit('sync:join', {
+  roomId: '123456',
+  participantId: '550e8400-e29b-41d4-a716-446655440000'
+}, (ack) => {
+  if (!ack?.ok) {
+    console.error('加入同步频道失败:', ack?.error?.message);
+    return;
+  }
+  console.log('加入同步频道成功:', ack.data);
+  
+  // 初始化视频播放器
+  const { videoState, serverTime } = ack.data;
+  initializePlayer(videoState, serverTime);
+});
+
+// 3) 监听同步事件（所有成员都会收到）
+// 防止同步事件触发循环的标志位
+let isSyncingSeek = false;
+
+syncSocket.on('sync:event', (event) => {
+  console.log('收到同步事件:', event);
+  
+  // 根据事件类型处理
+  switch (event.type) {
+    case 'PLAY':
+      videoPlayer.play();
+      break;
+    case 'PAUSE':
+      videoPlayer.pause();
+      break;
+    case 'SEEK':
+      // 设置标志位，避免触发播放器的 seeked 事件后再次发送同步请求
+      isSyncingSeek = true;
+      videoPlayer.currentTime = event.payload.progress;
+      // 注意：设置 currentTime 会触发 seeked 事件，但由于 isSyncingSeek 标志，不会再次发送同步请求
+      break;
+    case 'CHANGE_RATE':
+      videoPlayer.playbackRate = event.payload.playbackRate;
+      break;
+    case 'CHANGE_SOURCE':
+      videoPlayer.src = event.payload.source;
+      videoPlayer.load();
+      break;
+    case 'CHANGE_SUBTITLE':
+      // 根据播放器实现设置字幕
+      if (videoPlayer.textTracks) {
+        // HTML5 video 字幕处理
+        // 具体实现取决于字幕格式和播放器
+      }
+      break;
+  }
+});
+
+// 4) 房间创建者执行同步控制操作
+const playVideo = () => {
+  syncSocket.emit('sync:play', {
+    roomId: '123456',
+    operatorId: '550e8400-e29b-41d4-a716-446655440000'
+  }, (ack) => {
+    if (!ack?.ok) {
+      console.error('播放失败:', ack?.error?.message);
+      return;
+    }
+    console.log('播放成功');
+  });
+};
+
+const pauseVideo = () => {
+  syncSocket.emit('sync:pause', {
+    roomId: '123456',
+    operatorId: '550e8400-e29b-41d4-a716-446655440000'
+  }, (ack) => {
+    if (!ack?.ok) {
+      console.error('暂停失败:', ack?.error?.message);
+      return;
+    }
+    console.log('暂停成功');
+  });
+};
+
+const seekVideo = (progress) => {
+  syncSocket.emit('sync:seek', {
+    roomId: '123456',
+    operatorId: '550e8400-e29b-41d4-a716-446655440000',
+    progress: progress
+  }, (ack) => {
+    if (!ack?.ok) {
+      console.error('跳转失败:', ack?.error?.message);
+      return;
+    }
+    console.log('跳转成功');
+  });
+};
+
+// 5) 监听视频播放器的进度跳转事件（仅房主需要）
+// 当房主在播放器中拖动进度条或跳转时，自动触发全员同步
+// 注意：isSyncingSeek 标志位已在步骤3中定义
+
+if (isCreator) {
+  // 监听播放器的 seeked 事件（HTML5 video 元素）
+  videoPlayer.addEventListener('seeked', (e) => {
+    // 如果是因为收到同步事件而跳转的，则不发送同步请求
+    if (isSyncingSeek) {
+      isSyncingSeek = false;
+      return;
+    }
+    
+    // 获取当前播放进度
+    const currentTime = videoPlayer.currentTime;
+    
+    // 自动触发同步
+    seekVideo(currentTime);
+  });
+  
+  // 如果使用其他播放器库（如 Video.js、DPlayer 等），监听相应的事件
+  // 例如 Video.js:
+  // videoPlayer.on('seeked', () => {
+  //   if (isSyncingSeek) {
+  //     isSyncingSeek = false;
+  //     return;
+  //   }
+  //   seekVideo(videoPlayer.currentTime());
+  // });
+  
+  // 例如 DPlayer:
+  // videoPlayer.on('seek', () => {
+  //   if (isSyncingSeek) {
+  //     isSyncingSeek = false;
+  //     return;
+  //   }
+  //   seekVideo(videoPlayer.video.currentTime);
+  // });
+}
+
+// 注意：步骤3中已经处理了同步事件的接收，包括SEEK事件的标志位设置
+// 这里只需要确保房主监听播放器的跳转事件即可
+
+const changePlaybackRate = (rate) => {
+  syncSocket.emit('sync:changeRate', {
+    roomId: '123456',
+    operatorId: '550e8400-e29b-41d4-a716-446655440000',
+    rate: rate
+  }, (ack) => {
+    if (!ack?.ok) {
+      console.error('改变倍速失败:', ack?.error?.message);
+      return;
+    }
+    console.log('改变倍速成功');
+  });
+};
+
+const changeSource = (sourceUrl) => {
+  syncSocket.emit('sync:changeSource', {
+    roomId: '123456',
+    operatorId: '550e8400-e29b-41d4-a716-446655440000',
+    sourceUrl: sourceUrl
+  }, (ack) => {
+    if (!ack?.ok) {
+      console.error('更换视频源失败:', ack?.error?.message);
+      return;
+    }
+    console.log('更换视频源成功');
+  });
+};
+```
+
 ---
 
 ## API接口列表
@@ -186,27 +603,12 @@ const createRoom = async () => {
 
 ### 2. 获取房间列表
 
-获取所有可用房间的列表，支持分页和搜索。
+获取所有可用房间的列表。
 
 **请求**
 
 ```
 GET /api/rooms
-```
-
-**查询参数**
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| keyword | string | 否 | 搜索关键词，匹配房间名称或房间号 |
-| status | string | 否 | 房间状态过滤：waiting, playing |
-| page | number | 否 | 页码，默认1 |
-| pageSize | number | 否 | 每页数量，默认20 |
-
-**请求示例**
-
-```
-GET /api/rooms?keyword=观影&status=waiting&page=1&pageSize=10
 ```
 
 **响应示例**
@@ -238,13 +640,7 @@ GET /api/rooms?keyword=观影&status=waiting&page=1&pageSize=10
         "creatorNickname": "影迷小李",
         "createTime": "2026-01-13T09:30:00.000Z"
       }
-    ],
-    "pagination": {
-      "page": 1,
-      "pageSize": 10,
-      "total": 2,
-      "totalPages": 1
-    }
+    ]
   },
   "timestamp": "2026-01-13T10:30:00.000Z"
 }
@@ -255,20 +651,13 @@ GET /api/rooms?keyword=观影&status=waiting&page=1&pageSize=10
 ```javascript
 import axios from 'axios';
 
-const getRoomList = async (keyword = '', page = 1) => {
+const getRoomList = async () => {
   try {
-    const response = await axios.get('http://localhost:3000/api/rooms', {
-      params: {
-        keyword,
-        page,
-        pageSize: 10
-      }
-    });
+    const response = await axios.get('http://localhost:3000/api/rooms');
     
     if (response.data.success) {
-      const { list, pagination } = response.data.data;
+      const { list } = response.data.data;
       console.log('房间列表:', list);
-      console.log('分页信息:', pagination);
       return response.data.data;
     }
   } catch (error) {
@@ -871,7 +1260,7 @@ apiClient.interceptors.response.use(
 // 房间相关API
 export const roomApi = {
   // 获取房间列表
-  getList: (params) => apiClient.get('/rooms', { params }),
+  getList: () => apiClient.get('/rooms'),
   
   // 获取房间详情
   getDetail: (roomId) => apiClient.get(`/rooms/${roomId}`),
@@ -929,7 +1318,7 @@ export default {
     
     const loadRooms = async () => {
       try {
-        const response = await roomApi.getList({ page: 1, pageSize: 20 });
+        const response = await roomApi.getList();
         rooms.value = response.data.data.list;
       } catch (error) {
         console.error('加载房间列表失败');
@@ -1011,3 +1400,13 @@ export default {
 | status | string | 状态（online/offline） |
 | joinTime | string | 加入时间（ISO8601） |
 
+### B. 常见问题
+
+**Q: 如何处理房间密码？**
+A: 加入有密码的房间时，需要在请求体中传递password字段。可以先调用验证密码接口进行预检查。
+
+**Q: 如何判断当前用户是否是房间创建者？**
+A: 比较localStorage中保存的userId与房间详情中的creatorId是否一致。
+
+**Q: 服务重启后数据会丢失吗？**
+A: 是的，当前版本使用内存存储，服务重启后数据会丢失。后续版本会添加持久化存储。

@@ -2,14 +2,18 @@
  * @file 应用入口文件
  * @description Express应用的主入口，负责初始化和配置整个应用
  *              包括中间件配置、路由注册、错误处理等
+ *              同时集成Socket.IO服务器用于实时通信
  * @module app
  */
 
 const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
 const config = require('./config');
 const createRoomRouter = require('./routes/roomRoutes');
 const requestLogger = require('./middlewares/requestLogger');
 const { errorHandler, notFoundHandler } = require('./middlewares/errorHandler');
+const SyncGateway = require('./gateways/SyncGateway');
 
 /**
  * 创建并配置Express应用实例
@@ -110,12 +114,30 @@ const createApp = () => {
 
 /**
  * 启动服务器
+ * 同时启动HTTP服务器和Socket.IO服务器
  */
 const startServer = () => {
   const app = createApp();
   const { port, host } = config.server;
 
-  app.listen(port, () => {
+  // 创建HTTP服务器
+  const httpServer = http.createServer(app);
+
+  // 创建Socket.IO服务器
+  const io = new Server(httpServer, {
+    cors: {
+      origin: config.cors.origin,
+      methods: config.cors.methods,
+      allowedHeaders: config.cors.allowedHeaders
+    }
+  });
+
+  // 注册同步控制网关
+  const syncGateway = new SyncGateway(io);
+  syncGateway.register();
+
+  // 启动HTTP服务器（同时支持Socket.IO）
+  httpServer.listen(port, () => {
     console.log('================================================');
     console.log('  在线观影室后端服务启动成功');
     console.log('================================================');
@@ -123,10 +145,14 @@ const startServer = () => {
     console.log(`  API地址:  http://${host}:${port}/api`);
     console.log(`  房间API:  http://${host}:${port}/api/rooms`);
     console.log(`  健康检查: http://${host}:${port}/health`);
+    console.log(`  Socket.IO: ws://${host}:${port}`);
+    console.log(`  同步控制: ws://${host}:${port}/sync`);
     console.log('================================================');
     console.log(`  启动时间: ${new Date().toISOString()}`);
     console.log('================================================');
   });
+
+  return { httpServer, io };
 };
 
 // 如果直接运行此文件，启动服务器
