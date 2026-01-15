@@ -1,10 +1,12 @@
 /**
  * @file 同步控制Socket网关
  * @description 处理视频同步控制的Socket.IO事件，负责接收客户端同步控制请求并广播同步事件
+ *              同时处理成员加入/离开事件的广播，实现房间成员列表的实时更新
  * @module gateways/SyncGateway
  */
 
 const SyncService = require('../services/SyncService');
+const RoomService = require('../services/RoomService');
 const {
   RoomNotFoundException,
   RoomClosedException,
@@ -28,7 +30,12 @@ class SyncGateway {
   constructor(io) {
     this.io = io;
     this.syncService = SyncService.getInstance();
+    this.roomService = RoomService.getInstance();
     this.namespace = io.of('/sync');
+    
+    // 存储 socket.id 与 { roomId, participantId, nickname } 的映射关系
+    // 用于在断开连接时广播成员离开事件
+    this.socketParticipantMap = new Map();
   }
 
   /**
@@ -41,6 +48,7 @@ class SyncGateway {
 
       // 注册所有事件处理器
       this.handleJoin(socket);
+      this.handleLeave(socket);
       this.handlePlay(socket);
       this.handlePause(socket);
       this.handleSeek(socket);
@@ -52,6 +60,7 @@ class SyncGateway {
       // 处理断开连接
       socket.on('disconnect', () => {
         console.log(`[SyncGateway] 客户端断开: ${socket.id}`);
+        this.handleDisconnect(socket);
       });
     });
   }
@@ -64,7 +73,7 @@ class SyncGateway {
   handleJoin(socket) {
     socket.on('sync:join', async (data, ack) => {
       try {
-        const { roomId, participantId } = data;
+        const { roomId, participantId, nickname } = data;
 
         // 参数验证
         if (!roomId || !participantId) {
@@ -84,21 +93,170 @@ class SyncGateway {
         const channel = `room:${roomId}`;
         socket.join(channel);
 
+        // 存储 socket 与参与者的映射关系（用于断开连接时广播离开事件）
+        this.socketParticipantMap.set(socket.id, {
+          roomId,
+          participantId,
+          nickname: nickname || '匿名用户'
+        });
+
+        // 获取房间详情以获取成员列表
+        let participants = [];
+        try {
+          const roomDetail = await this.roomService.getRoomDetail(roomId);
+          participants = roomDetail.participants || [];
+        } catch (e) {
+          console.warn(`[SyncGateway] 获取房间详情失败: ${e.message}`);
+        }
+
+        // 广播成员加入事件给房间内其他成员（排除自己）
+        socket.to(channel).emit('member:joined', {
+          roomId,
+          participant: {
+            id: participantId,
+            nickname: nickname || '匿名用户'
+          },
+          participants,
+          timestamp: Date.now()
+        });
+
         // 返回成功响应
         ack({
           ok: true,
           data: {
             channel: channel,
             videoState: initState.videoState,
-            serverTime: initState.serverTime
+            serverTime: initState.serverTime,
+            participants
           }
         });
 
-        console.log(`[SyncGateway] 参与者 ${participantId} 加入房间 ${roomId} 的同步频道`);
+        console.log(`[SyncGateway] 参与者 ${participantId} (${nickname || '匿名'}) 加入房间 ${roomId} 的同步频道`);
       } catch (error) {
         this.handleError(socket, error, ack);
       }
     });
+  }
+
+  /**
+   * 处理离开同步频道
+   * 
+   * @param {Object} socket - Socket连接实例
+   */
+  handleLeave(socket) {
+    socket.on('sync:leave', async (data, ack) => {
+      try {
+        const { roomId, participantId } = data;
+
+        if (!roomId || !participantId) {
+          if (ack) {
+            return ack({
+              ok: false,
+              error: {
+                code: 'VALIDATION_ERROR',
+                message: 'roomId和participantId不能为空'
+              }
+            });
+          }
+          return;
+        }
+
+        const channel = `room:${roomId}`;
+        
+        // 从映射表中获取昵称
+        const participantInfo = this.socketParticipantMap.get(socket.id);
+        const nickname = participantInfo?.nickname || '匿名用户';
+
+        // 离开房间频道
+        socket.leave(channel);
+
+        // 清除映射关系
+        this.socketParticipantMap.delete(socket.id);
+
+        // 获取更新后的成员列表
+        let participants = [];
+        try {
+          const roomDetail = await this.roomService.getRoomDetail(roomId);
+          participants = roomDetail.participants || [];
+        } catch (e) {
+          console.warn(`[SyncGateway] 获取房间详情失败: ${e.message}`);
+        }
+
+        // 广播成员离开事件给房间内其他成员
+        this.broadcastToRoom(roomId, 'member:left', {
+          roomId,
+          participant: {
+            id: participantId,
+            nickname
+          },
+          participants,
+          timestamp: Date.now()
+        });
+
+        if (ack) {
+          ack({
+            ok: true,
+            data: { message: '已离开同步频道' }
+          });
+        }
+
+        console.log(`[SyncGateway] 参与者 ${participantId} (${nickname}) 离开房间 ${roomId} 的同步频道`);
+      } catch (error) {
+        if (ack) {
+          this.handleError(socket, error, ack);
+        }
+      }
+    });
+  }
+
+  /**
+   * 处理Socket断开连接
+   * 自动广播成员离开事件
+   * 
+   * @param {Object} socket - Socket连接实例
+   */
+  handleDisconnect(socket) {
+    const participantInfo = this.socketParticipantMap.get(socket.id);
+    
+    if (participantInfo) {
+      const { roomId, participantId, nickname } = participantInfo;
+
+      // 清除映射关系
+      this.socketParticipantMap.delete(socket.id);
+
+      // 异步获取更新后的成员列表并广播
+      this.roomService.getRoomDetail(roomId)
+        .then(roomDetail => {
+          const participants = roomDetail.participants || [];
+          
+          // 广播成员离开事件
+          this.broadcastToRoom(roomId, 'member:left', {
+            roomId,
+            participant: {
+              id: participantId,
+              nickname
+            },
+            participants,
+            timestamp: Date.now()
+          });
+
+          console.log(`[SyncGateway] 参与者 ${participantId} (${nickname}) 断开连接，已广播离开事件`);
+        })
+        .catch(e => {
+          // 房间可能已被解散，广播离开事件但不带成员列表
+          this.broadcastToRoom(roomId, 'member:left', {
+            roomId,
+            participant: {
+              id: participantId,
+              nickname
+            },
+            participants: [],
+            timestamp: Date.now()
+          });
+
+          console.log(`[SyncGateway] 参与者 ${participantId} 断开连接（房间可能已解散）`);
+        });
+    }
   }
 
   /**

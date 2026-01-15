@@ -23,6 +23,28 @@ export type SyncEventType =
   | 'CHANGE_RATE'
   | 'CHANGE_SUBTITLE'
 
+// 成员事件类型
+export type MemberEventType = 'joined' | 'left'
+
+// 参与者信息
+export interface ParticipantInfo {
+  id: string
+  nickname: string
+  role?: string
+  status?: string
+}
+
+// 成员事件
+export interface MemberEvent {
+  roomId: string
+  participant: {
+    id: string
+    nickname: string
+  }
+  participants: ParticipantInfo[]
+  timestamp: number
+}
+
 // 视频状态接口
 export interface VideoState {
   source: string | null
@@ -66,14 +88,19 @@ interface AckResponse {
 // 同步控制回调函数类型
 export type SyncEventCallback = (event: SyncEvent) => void
 export type ErrorCallback = (error: { code: string; message: string }) => void
+export type MemberJoinedCallback = (event: MemberEvent) => void
+export type MemberLeftCallback = (event: MemberEvent) => void
 
 class SyncService {
   private socket: Socket | null = null
   private roomId: string = ''
   private participantId: string = ''
+  private nickname: string = ''
   private isConnected: boolean = false
   private eventCallbacks: Set<SyncEventCallback> = new Set()
   private errorCallbacks: Set<ErrorCallback> = new Set()
+  private memberJoinedCallbacks: Set<MemberJoinedCallback> = new Set()
+  private memberLeftCallbacks: Set<MemberLeftCallback> = new Set()
 
   /**
    * 连接同步控制服务
@@ -118,6 +145,18 @@ class SyncService {
       console.log('[SyncService] 收到同步事件:', event)
       this.notifyEvent(event)
     })
+
+    // 监听成员加入事件
+    this.socket.on('member:joined', (event: MemberEvent) => {
+      console.log('[SyncService] 收到成员加入事件:', event)
+      this.notifyMemberJoined(event)
+    })
+
+    // 监听成员离开事件
+    this.socket.on('member:left', (event: MemberEvent) => {
+      console.log('[SyncService] 收到成员离开事件:', event)
+      this.notifyMemberLeft(event)
+    })
   }
 
   /**
@@ -125,8 +164,9 @@ class SyncService {
    */
   joinSyncChannel(
     roomId: string,
-    participantId: string
-  ): Promise<{ videoState: VideoState; serverTime: number }> {
+    participantId: string,
+    nickname?: string
+  ): Promise<{ videoState: VideoState; serverTime: number; participants: ParticipantInfo[] }> {
     return new Promise((resolve, reject) => {
       if (!this.socket?.connected) {
         reject(new Error('Socket 未连接，请先调用 connect()'))
@@ -135,10 +175,11 @@ class SyncService {
 
       this.roomId = roomId
       this.participantId = participantId
+      this.nickname = nickname || ''
 
       this.socket.emit(
         'sync:join',
-        { roomId, participantId },
+        { roomId, participantId, nickname },
         (ack: AckResponse) => {
           if (!ack?.ok) {
             const error = ack?.error || {
@@ -153,7 +194,8 @@ class SyncService {
           console.log('[SyncService] 加入同步频道成功:', ack.data)
           resolve({
             videoState: ack.data.videoState,
-            serverTime: ack.data.serverTime
+            serverTime: ack.data.serverTime,
+            participants: ack.data.participants || []
           })
         }
       )
@@ -296,6 +338,26 @@ class SyncService {
   }
 
   /**
+   * 注册成员加入监听器
+   */
+  onMemberJoined(callback: MemberJoinedCallback): () => void {
+    this.memberJoinedCallbacks.add(callback)
+    return () => {
+      this.memberJoinedCallbacks.delete(callback)
+    }
+  }
+
+  /**
+   * 注册成员离开监听器
+   */
+  onMemberLeft(callback: MemberLeftCallback): () => void {
+    this.memberLeftCallbacks.add(callback)
+    return () => {
+      this.memberLeftCallbacks.delete(callback)
+    }
+  }
+
+  /**
    * 通知所有事件监听器
    */
   private notifyEvent(event: SyncEvent): void {
@@ -322,6 +384,32 @@ class SyncService {
   }
 
   /**
+   * 通知所有成员加入监听器
+   */
+  private notifyMemberJoined(event: MemberEvent): void {
+    this.memberJoinedCallbacks.forEach(callback => {
+      try {
+        callback(event)
+      } catch (error) {
+        console.error('[SyncService] 成员加入回调执行错误:', error)
+      }
+    })
+  }
+
+  /**
+   * 通知所有成员离开监听器
+   */
+  private notifyMemberLeft(event: MemberEvent): void {
+    this.memberLeftCallbacks.forEach(callback => {
+      try {
+        callback(event)
+      } catch (error) {
+        console.error('[SyncService] 成员离开回调执行错误:', error)
+      }
+    })
+  }
+
+  /**
    * 离开同步频道
    */
   leave(): void {
@@ -340,6 +428,8 @@ class SyncService {
     this.leave()
     this.eventCallbacks.clear()
     this.errorCallbacks.clear()
+    this.memberJoinedCallbacks.clear()
+    this.memberLeftCallbacks.clear()
     if (this.socket) {
       this.socket.disconnect()
       this.socket = null
@@ -347,6 +437,7 @@ class SyncService {
     this.isConnected = false
     this.roomId = ''
     this.participantId = ''
+    this.nickname = ''
   }
 
   /**

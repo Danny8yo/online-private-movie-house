@@ -96,7 +96,7 @@
 
 ### 事件：加入同步频道
 
-客户端加入某个房间的同步控制频道（Socket.IO room），并获取当前视频状态。
+客户端加入某个房间的同步控制频道（Socket.IO room），并获取当前视频状态。成功加入后，服务端会自动向房间内其他成员广播 `member:joined` 事件。
 
 **事件名（Client → Server）**：`sync:join`
 
@@ -106,6 +106,7 @@
 |------|------|------|------|
 | roomId | string | 是 | 房间ID（6位房间号） |
 | participantId | string | 是 | 参与者ID（由加入房间 API 返回） |
+| nickname | string | 否 | 用户昵称（用于广播成员加入事件，如不提供则使用"匿名用户"） |
 
 **ACK 返回 data**
 
@@ -114,6 +115,7 @@
 | channel | string | 实际加入的 Socket room 名称（`room:{roomId}`） |
 | videoState | object | 当前视频状态（包含 source、status、progress、playbackRate、subtitle 等） |
 | serverTime | number | 服务端时间戳（毫秒） |
+| participants | array | 当前房间的完整成员列表 |
 
 ---
 
@@ -296,6 +298,88 @@
 
 ---
 
+### 事件：成员加入广播
+
+当有新成员加入同步频道时，服务端向房间内其他成员广播成员加入事件。
+
+**事件名（Server → Client）**：`member:joined`
+
+**消息体（MemberEvent）**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| roomId | string | 房间ID |
+| participant | object | 新加入的成员信息 |
+| participant.id | string | 成员ID |
+| participant.nickname | string | 成员昵称 |
+| participants | array | 更新后的完整成员列表 |
+| timestamp | number | 事件时间戳（毫秒） |
+
+**participants 数组元素结构**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | string | 成员ID |
+| nickname | string | 成员昵称 |
+| role | string | 角色（creator/viewer） |
+| status | string | 状态（online/offline） |
+
+**消息示例**
+
+```json
+{
+  "roomId": "123456",
+  "participant": {
+    "id": "550e8400-e29b-41d4-a716-446655440001",
+    "nickname": "新观众"
+  },
+  "participants": [
+    { "id": "550e8400-e29b-41d4-a716-446655440000", "nickname": "房主", "role": "creator", "status": "online" },
+    { "id": "550e8400-e29b-41d4-a716-446655440001", "nickname": "新观众", "role": "viewer", "status": "online" }
+  ],
+  "timestamp": 1736899200000
+}
+```
+
+---
+
+### 事件：成员离开广播
+
+当成员离开同步频道（主动离开或断开连接）时，服务端向房间内其他成员广播成员离开事件。
+
+**事件名（Server → Client）**：`member:left`
+
+**消息体（MemberEvent）**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| roomId | string | 房间ID |
+| participant | object | 离开的成员信息 |
+| participant.id | string | 成员ID |
+| participant.nickname | string | 成员昵称 |
+| participants | array | 更新后的完整成员列表 |
+| timestamp | number | 事件时间戳（毫秒） |
+
+**消息示例**
+
+```json
+{
+  "roomId": "123456",
+  "participant": {
+    "id": "550e8400-e29b-41d4-a716-446655440001",
+    "nickname": "离开的观众"
+  },
+  "participants": [
+    { "id": "550e8400-e29b-41d4-a716-446655440000", "nickname": "房主", "role": "creator", "status": "online" }
+  ],
+  "timestamp": 1736899260000
+}
+```
+
+> **说明**：当 Socket 连接断开（如网络中断、关闭浏览器）时，服务端会自动广播 `member:left` 事件。
+
+---
+
 ### 前端调用示例（Socket.IO 同步控制）
 
 > 以下展示同步控制模块的完整使用流程。
@@ -317,7 +401,8 @@ const syncSocket = io('http://localhost:3000/sync', {
 // 2) 加入同步频道（必须先通过 REST API 加入房间获取 participantId）
 syncSocket.emit('sync:join', {
   roomId: '123456',
-  participantId: '550e8400-e29b-41d4-a716-446655440000'
+  participantId: '550e8400-e29b-41d4-a716-446655440000',
+  nickname: '房主小明'  // 可选参数，用于广播成员加入事件
 }, (ack) => {
   if (!ack?.ok) {
     console.error('加入同步频道失败:', ack?.error?.message);
@@ -326,8 +411,10 @@ syncSocket.emit('sync:join', {
   console.log('加入同步频道成功:', ack.data);
   
   // 初始化视频播放器
-  const { videoState, serverTime } = ack.data;
+  const { videoState, serverTime, participants } = ack.data;
   initializePlayer(videoState, serverTime);
+  // 可以更新成员列表显示
+  updateParticipantsList(participants);
 });
 
 // 3) 监听同步事件（所有成员都会收到）
@@ -368,7 +455,20 @@ syncSocket.on('sync:event', (event) => {
   }
 });
 
-// 4) 房间创建者执行同步控制操作
+// 4) 监听成员加入/离开事件
+syncSocket.on('member:joined', (event) => {
+  console.log('成员加入:', event.participant.nickname);
+  // 更新成员列表显示
+  updateParticipantsList(event.participants);
+});
+
+syncSocket.on('member:left', (event) => {
+  console.log('成员离开:', event.participant.nickname);
+  // 更新成员列表显示
+  updateParticipantsList(event.participants);
+});
+
+// 5) 房间创建者执行同步控制操作
 const playVideo = () => {
   syncSocket.emit('sync:play', {
     roomId: '123456',
@@ -409,7 +509,7 @@ const seekVideo = (progress) => {
   });
 };
 
-// 5) 监听视频播放器的进度跳转事件（仅房主需要）
+// 6) 监听视频播放器的进度跳转事件（仅房主需要）
 // 当房主在播放器中拖动进度条或跳转时，自动触发全员同步
 // 注意：isSyncingSeek 标志位已在步骤3中定义
 
@@ -1283,7 +1383,7 @@ export const roomApi = {
   update: (roomId, data) => apiClient.patch(`/rooms/${roomId}`, data),
   
   // 验证密码
-  verifyPassword: (roomId, password) => 
+  verifyPassword: (roomId, password) =>
     apiClient.post(`/rooms/${roomId}/verify-password`, { password }),
   
   // 获取统计信息

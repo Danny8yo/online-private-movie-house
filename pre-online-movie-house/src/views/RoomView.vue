@@ -159,7 +159,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ArtPlayer from '../components/ArtPlayer.vue'
 import roomApi from '@/api/roomApi'
-import syncService, { type SyncEvent, type VideoState } from '@/services/syncService'
+import syncService, { type SyncEvent, type VideoState, type MemberEvent } from '@/services/syncService'
 
 const route = useRoute()
 const router = useRouter()
@@ -336,6 +336,16 @@ const initSyncService = async (initialVideoState?: VideoState) => {
       handleSyncEvent(event)
     })
 
+    // 注册成员加入事件监听
+    syncService.onMemberJoined((event: MemberEvent) => {
+      handleMemberJoined(event)
+    })
+
+    // 注册成员离开事件监听
+    syncService.onMemberLeft((event: MemberEvent) => {
+      handleMemberLeft(event)
+    })
+
     // 等待连接建立
     await new Promise<void>((resolve) => {
       const checkConnection = setInterval(() => {
@@ -352,10 +362,16 @@ const initSyncService = async (initialVideoState?: VideoState) => {
       }, 5000)
     })
 
-    // 加入同步频道
+    // 加入同步频道（传入昵称以便广播）
     if (participantId.value) {
-      const result = await syncService.joinSyncChannel(roomId, participantId.value)
+      const result = await syncService.joinSyncChannel(roomId, participantId.value, userNickname.value)
       syncConnected.value = true
+
+      // 更新成员列表
+      if (result.participants && result.participants.length > 0) {
+        participants.value = result.participants
+        connectedUsers.value = result.participants.length
+      }
 
       // 初始化播放器状态
       if (result.videoState && playerRef.value) {
@@ -376,6 +392,60 @@ const initSyncService = async (initialVideoState?: VideoState) => {
       content: `同步服务连接失败: ${error.message}`
     })
   }
+}
+
+// 处理成员加入事件
+const handleMemberJoined = (event: MemberEvent) => {
+  console.log('[RoomView] 成员加入:', event)
+  
+  // 更新成员列表
+  if (event.participants && event.participants.length > 0) {
+    participants.value = event.participants
+  } else {
+    // 如果没有完整列表，手动添加新成员
+    const exists = participants.value.some(p => p.id === event.participant.id)
+    if (!exists) {
+      participants.value.push({
+        id: event.participant.id,
+        nickname: event.participant.nickname,
+        role: 'viewer',
+        status: 'online'
+      })
+    }
+  }
+  
+  connectedUsers.value = participants.value.length
+  
+  // 显示系统消息
+  messages.push({
+    type: 'system',
+    content: `${event.participant.nickname} 加入了房间`
+  })
+  
+  scrollToBottom()
+}
+
+// 处理成员离开事件
+const handleMemberLeft = (event: MemberEvent) => {
+  console.log('[RoomView] 成员离开:', event)
+  
+  // 更新成员列表
+  if (event.participants && event.participants.length > 0) {
+    participants.value = event.participants
+  } else {
+    // 如果没有完整列表，手动移除成员
+    participants.value = participants.value.filter(p => p.id !== event.participant.id)
+  }
+  
+  connectedUsers.value = participants.value.length
+  
+  // 显示系统消息
+  messages.push({
+    type: 'system',
+    content: `${event.participant.nickname} 离开了房间`
+  })
+  
+  scrollToBottom()
 }
 
 // 应用视频状态到播放器
