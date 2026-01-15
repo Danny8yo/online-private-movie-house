@@ -57,7 +57,9 @@
 
       <div class="player-container">
         <ArtPlayer
+          ref="playerRef"
           :src="roomInfo.videoUrl"
+          :sync-mode="!isOwner"
           class="video-player"
           airplay
           aspect-ratio
@@ -74,14 +76,19 @@
           pip
           screenshot
           subtitle-offset
+          @play="handlePlayerPlay"
+          @pause="handlePlayerPause"
+          @seek="handlePlayerSeek"
+          @ratechange="handlePlayerRateChange"
+          @sourcechange="handlePlayerSourceChange"
         />
       </div>
 
       <div class="control-bar">
         <!-- 模拟同步控制 -->
         <div class="playback-info">
-          <span class="status-dot online"></span>
-          <span>{{ connectedUsers }} 人在线 - 同步正常</span>
+          <span class="status-dot" :class="syncConnected ? 'online' : 'offline'"></span>
+          <span>{{ connectedUsers }} 人在线 - {{ syncConnected ? '同步正常' : '同步断开' }}</span>
         </div>
         <button class="btn-sync" @click="forceSync">全员强制同步</button>
       </div>
@@ -152,6 +159,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ArtPlayer from '../components/ArtPlayer.vue'
 import roomApi from '@/api/roomApi'
+import syncService, { type SyncEvent, type VideoState } from '@/services/syncService'
 
 const route = useRoute()
 const router = useRouter()
@@ -201,26 +209,26 @@ const updateVideoSource = async () => {
     return
   }
 
+  if (!isOwner.value) {
+    alert('只有房主可以更换视频源')
+    return
+  }
+
   isUpdatingVideo.value = true
 
   try {
-    const response = await roomApi.update(roomId, {
-      operatorId: userId.value,
-      // 注：后端API文档中没有直接更新视频的字段，这里示范调用
-      // 实际需要根据后端支持情况调整
-    })
+    // 使用同步服务更换视频源
+    await syncService.changeSource(userId.value, newVideoUrl.value.trim())
 
-    if (response.data.success) {
-      roomInfo.videoUrl = newVideoUrl.value
-      messages.push({
-        type: 'system',
-        content: '房主更新了片源'
-      })
-      showVideoSettings.value = false
-      newVideoUrl.value = ''
-    }
+    roomInfo.videoUrl = newVideoUrl.value.trim()
+    messages.push({
+      type: 'system',
+      content: '已更换视频源'
+    })
+    showVideoSettings.value = false
+    newVideoUrl.value = ''
   } catch (error: any) {
-    alert('更新片源失败：' + (error.response?.data?.message || error.message))
+    alert('更新片源失败：' + (error.message || '未知错误'))
   } finally {
     isUpdatingVideo.value = false
   }
@@ -251,6 +259,17 @@ const goBack = () => {
 
 const chatBox = ref<HTMLElement | null>(null)
 
+// 播放器引用
+const playerRef = ref<InstanceType<typeof ArtPlayer> | null>(null)
+
+// 同步控制相关
+const syncConnected = ref(false)
+// 参与者ID：创建房间时是 creator.id，加入房间时是 participant.id
+// 优先从 participantId 获取，否则使用 userId
+const participantId = computed(() => {
+  return localStorage.getItem('participantId') || userId.value
+})
+
 // ==========================================
 // 初始化与连接
 // ==========================================
@@ -271,8 +290,8 @@ const loadRoomDetail = async () => {
       roomInfo.status = room.status
       participants.value = room.participants || []
 
-      // 模拟初始视频源
-      roomInfo.videoUrl = room.videoState?.source || 'https://vp-demo.u2sb.com/video/caminandes_03_llamigos_720p.mp4'
+      // 设置初始视频源
+      roomInfo.videoUrl = room.videoState?.source || ''
 
       // 添加系统消息
       messages.push({
@@ -283,12 +302,176 @@ const loadRoomDetail = async () => {
         type: 'system',
         content: `房间成员：${room.currentCount} 人`
       })
+
+      // 初始化同步服务
+      await initSyncService(room.videoState)
     }
   } catch (error: any) {
     errorMessage.value = error.response?.data?.message || '加载房间详情失败'
     console.error('加载房间失败:', error)
   } finally {
     isLoading.value = false
+  }
+}
+
+// ==========================================
+// 同步控制服务初始化
+// ==========================================
+const initSyncService = async (initialVideoState?: VideoState) => {
+  try {
+    // 连接同步服务
+    syncService.connect()
+
+    // 注册错误监听
+    syncService.onError((error) => {
+      console.error('[SyncService] 错误:', error)
+      messages.push({
+        type: 'system',
+        content: `同步错误: ${error.message}`
+      })
+    })
+
+    // 注册同步事件监听
+    syncService.onSyncEvent((event: SyncEvent) => {
+      handleSyncEvent(event)
+    })
+
+    // 等待连接建立
+    await new Promise<void>((resolve) => {
+      const checkConnection = setInterval(() => {
+        if (syncService.getConnected()) {
+          clearInterval(checkConnection)
+          resolve()
+        }
+      }, 100)
+
+      // 超时处理
+      setTimeout(() => {
+        clearInterval(checkConnection)
+        resolve()
+      }, 5000)
+    })
+
+    // 加入同步频道
+    if (participantId.value) {
+      const result = await syncService.joinSyncChannel(roomId, participantId.value)
+      syncConnected.value = true
+
+      // 初始化播放器状态
+      if (result.videoState && playerRef.value) {
+        applyVideoState(result.videoState, result.serverTime)
+      }
+
+      messages.push({
+        type: 'system',
+        content: '已连接到同步服务'
+      })
+    } else {
+      console.warn('participantId 未设置，无法加入同步频道')
+    }
+  } catch (error: any) {
+    console.error('初始化同步服务失败:', error)
+    messages.push({
+      type: 'system',
+      content: `同步服务连接失败: ${error.message}`
+    })
+  }
+}
+
+// 应用视频状态到播放器
+const applyVideoState = (videoState: VideoState, serverTime: number) => {
+  if (!playerRef.value) return
+
+  const player = playerRef.value
+
+  // 更换视频源
+  if (videoState.source && videoState.source !== roomInfo.videoUrl) {
+    roomInfo.videoUrl = videoState.source
+    player.switchUrl(videoState.source)
+  }
+
+  // 设置播放倍速
+  if (videoState.playbackRate) {
+    player.setPlaybackRate(videoState.playbackRate)
+  }
+
+  // 设置播放状态
+  if (videoState.status === 'playing') {
+    // 计算当前应该的进度（考虑服务器时间差）
+    const now = Date.now()
+    const timeDiff = now - serverTime
+    const expectedProgress = videoState.progress + (timeDiff / 1000) * videoState.playbackRate
+
+    player.seek(expectedProgress)
+    player.play()
+  } else if (videoState.status === 'paused') {
+    player.seek(videoState.progress)
+    player.pause()
+  }
+}
+
+// 处理同步事件
+const handleSyncEvent = (event: SyncEvent) => {
+  if (!playerRef.value) return
+
+  const player = playerRef.value
+  const { type, payload } = event
+
+  console.log('[RoomView] 处理同步事件:', type, payload)
+
+  switch (type) {
+    case 'CHANGE_SOURCE':
+      if (payload.source !== roomInfo.videoUrl) {
+        roomInfo.videoUrl = payload.source || ''
+        if (payload.source) {
+          player.switchUrl(payload.source)
+        }
+      }
+      messages.push({
+        type: 'system',
+        content: '房主更换了视频源'
+      })
+      break
+
+    case 'PLAY':
+      player.play()
+      messages.push({
+        type: 'system',
+        content: '房主开始播放'
+      })
+      break
+
+    case 'PAUSE':
+      player.pause()
+      messages.push({
+        type: 'system',
+        content: '房主暂停了播放'
+      })
+      break
+
+    case 'SEEK':
+      player.seek(payload.progress)
+      messages.push({
+        type: 'system',
+        content: `房主跳转到 ${Math.floor(payload.progress)} 秒`
+      })
+      break
+
+    case 'CHANGE_RATE':
+      player.setPlaybackRate(payload.playbackRate)
+      messages.push({
+        type: 'system',
+        content: `房主设置播放倍速为 ${payload.playbackRate}x`
+      })
+      break
+
+    case 'CHANGE_SUBTITLE':
+      // ArtPlayer 字幕设置需要根据实际API调整
+      messages.push({
+        type: 'system',
+        content: payload.subtitle ? '房主开启了字幕' : '房主关闭了字幕'
+      })
+      break
   }
 }
 
@@ -303,42 +486,85 @@ const leaveRoomAPI = async () => {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   if (!userId.value || !userNickname.value) {
     alert('请先加入房间')
     router.push('/join')
     return
   }
 
-  loadRoomDetail()
+  // participantId 从 userId 获取（已在 computed 中定义）
+
+  await loadRoomDetail()
   isConnected.value = true
   connectedUsers.value = participants.value.length
 })
 
 onUnmounted(() => {
+  // 断开同步服务连接
+  syncService.disconnect()
   leaveRoomAPI()
 })
 
 // ==========================================
-// 播放控制
+// 播放控制（房主操作）
 // ==========================================
-const handlePlay = () => {
-  console.log('Local Play Triggered')
+const handlePlayerPlay = () => {
+  if (isOwner.value && syncConnected.value) {
+    syncService.play(userId.value).catch((error) => {
+      console.error('播放同步失败:', error)
+    })
+  }
 }
 
-const handlePause = () => {
-  console.log('Local Pause Triggered')
+const handlePlayerPause = () => {
+  if (isOwner.value && syncConnected.value) {
+    syncService.pause(userId.value).catch((error) => {
+      console.error('暂停同步失败:', error)
+    })
+  }
 }
 
-const handleSeek = () => {
-  console.log('Local Seek Triggered')
+const handlePlayerSeek = (progress: number) => {
+  // 房主拖动进度条时触发同步
+  if (isOwner.value && syncConnected.value) {
+    syncService.seek(userId.value, progress).catch((error) => {
+      console.error('跳转同步失败:', error)
+    })
+  }
 }
 
-const forceSync = () => {
-  messages.push({
-    type: 'system',
-    content: '管理员已执行全员强制同步'
-  })
+const handlePlayerRateChange = (rate: number) => {
+  if (isOwner.value && syncConnected.value) {
+    syncService.changeRate(userId.value, rate).catch((error) => {
+      console.error('倍速同步失败:', error)
+    })
+  }
+}
+
+const handlePlayerSourceChange = (url: string | null) => {
+  // 视频源变更由 updateVideoSource 处理
+}
+
+const forceSync = async () => {
+  if (!isOwner.value) {
+    alert('只有房主可以执行强制同步')
+    return
+  }
+
+  try {
+    // 获取当前播放器状态并同步
+    if (playerRef.value) {
+      const currentTime = playerRef.value.getCurrentTime()
+      await syncService.seek(userId.value, currentTime)
+      messages.push({
+        type: 'system',
+        content: '已执行全员强制同步'
+      })
+    }
+  } catch (error: any) {
+    alert('强制同步失败：' + (error.message || '未知错误'))
+  }
 }
 
 // ==========================================
@@ -525,6 +751,11 @@ const endSession = async () => {
 .status-dot.online {
   background-color: #4cd964;
   box-shadow: 0 0 5px #4cd964;
+}
+
+.status-dot.offline {
+  background-color: #ff3b30;
+  box-shadow: 0 0 5px #ff3b30;
 }
 
 .playback-info {

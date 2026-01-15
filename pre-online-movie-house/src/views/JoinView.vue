@@ -185,8 +185,9 @@ const handleJoinRoom = async (roomId: string, password?: string) => {
     if (response.data.success) {
       const { room, participant } = response.data.data
       
-      // 保存用户信息
+      // 保存用户信息（participant.id 就是参与者ID，用于同步控制）
       localStorage.setItem('userId', participant.id)
+      localStorage.setItem('participantId', participant.id) // 明确保存 participantId
       localStorage.setItem('userNickname', userNickname.value)
       localStorage.setItem('currentRoomId', room.id)
       

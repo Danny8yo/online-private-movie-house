@@ -133,8 +133,9 @@ const handleCreate = async () => {
     if (response.data.success) {
       const { room, creator } = response.data.data
       
-      // 保存用户信息到本地存储，后续操作需要用到
+      // 保存用户信息到本地存储，后续操作需要用到（creator.id 就是参与者ID）
       localStorage.setItem('userId', creator.id)
+      localStorage.setItem('participantId', creator.id) // 明确保存 participantId
       localStorage.setItem('userNickname', creator.nickname)
       localStorage.setItem('currentRoomId', room.id)
       
