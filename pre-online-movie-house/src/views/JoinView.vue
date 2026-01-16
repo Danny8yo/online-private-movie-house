@@ -12,37 +12,7 @@
         <button class="btn-close" @click="errorMessage = ''">✕</button>
       </div>
 
-      <!-- 密码输入框 -->
-      <div v-if="showPasswordPrompt" class="modal-overlay">
-        <div class="modal-content">
-          <h3>房间需要密码</h3>
-          <input 
-            v-model="passwordInput" 
-            type="password" 
-            placeholder="请输入房间密码"
-            @keyup.enter="confirmPassword"
-            autofocus
-          />
-          <div class="modal-actions">
-            <button class="btn-text" @click="showPasswordPrompt = false">取消</button>
-            <button class="btn-primary" @click="confirmPassword" :disabled="!passwordInput">
-              确认
-            </button>
-          </div>
-        </div>
-      </div>
-
       <div class="join-methods">
-        <!-- 用户昵称输入 -->
-        <div class="nickname-section">
-          <h3>你的昵称</h3>
-          <input 
-            v-model="userNickname"
-            type="text"
-            placeholder="请输入你的昵称"
-            maxlength="20"
-          />
-        </div>
 
         <!-- Method 1: Input Code -->
         <div class="method-section">
@@ -132,13 +102,9 @@ interface RoomInfo {
 
 const router = useRouter()
 const inputRoomId = ref('')
-const userNickname = ref(localStorage.getItem('userNickname') || '')
 const roomList = ref<RoomInfo[]>([])
 const isLoading = ref(false)
 const errorMessage = ref('')
-const showPasswordPrompt = ref(false)
-const passwordInput = ref('')
-const pendingRoomId = ref('')
 
 // 加载房间列表
 const loadRoomList = async () => {
@@ -166,89 +132,19 @@ const goHome = () => {
   router.push('/')
 }
 
-// 处理加入房间
-const handleJoinRoom = async (roomId: string, password?: string) => {
-  if (!userNickname.value.trim()) {
-    alert('请输入昵称')
-    return
-  }
-
-  isLoading.value = true
-  errorMessage.value = ''
-
-  try {
-    const response = await roomApi.join(roomId, {
-      nickname: userNickname.value,
-      password: password || undefined
-    })
-
-    if (response.data.success) {
-      const { room, participant } = response.data.data
-      
-      // 保存用户信息（participant.id 就是参与者ID，用于同步控制）
-      localStorage.setItem('userId', participant.id)
-      localStorage.setItem('participantId', participant.id) // 明确保存 participantId
-      localStorage.setItem('userNickname', userNickname.value)
-      localStorage.setItem('currentRoomId', room.id)
-      
-      console.log('加入房间成功')
-      
-      // 跳转到房间页
-      router.push({
-        name: 'room',
-        params: { id: room.id }
-      })
-    }
-  } catch (error: any) {
-    const errorCode = error.response?.data?.errorCode
-    const message = error.response?.data?.message || '加入房间失败，请重试'
-
-    switch (errorCode) {
-      case 'ROOM_NOT_FOUND':
-        errorMessage.value = '房间不存在'
-        break
-      case 'ROOM_FULL':
-        errorMessage.value = '房间已满，无法加入'
-        break
-      case 'INVALID_PASSWORD':
-        errorMessage.value = '密码错误，请重试'
-        showPasswordPrompt.value = true
-        pendingRoomId.value = roomId
-        return
-      case 'ROOM_CLOSED':
-        errorMessage.value = '房间已关闭'
-        break
-      default:
-        errorMessage.value = message
-    }
-
-    console.error('加入房间失败:', error)
-  } finally {
-    isLoading.value = false
-  }
-}
-
+// 加入房间（跳转到RoomView，由RoomView弹出昵称/密码输入框）
 const joinRoom = (roomId: string, hasPassword: boolean = false) => {
   if (!roomId) return
   
-  if (hasPassword) {
-    pendingRoomId.value = roomId
-    showPasswordPrompt.value = true
-  } else {
-    handleJoinRoom(roomId)
-  }
-}
-
-const confirmPassword = () => {
-  if (!passwordInput.value.trim()) {
-    alert('请输入密码')
-    return
-  }
-
-  handleJoinRoom(pendingRoomId.value, passwordInput.value)
-  showPasswordPrompt.value = false
-  passwordInput.value = ''
-  pendingRoomId.value = ''
+  // 跳转到 RoomView，携带 roomId 和是否需要密码的信息
+  router.push({
+    name: 'room',
+    params: { id: roomId },
+    query: {
+      mode: 'join',
+      hasPassword: hasPassword ? '1' : '0'
+    }
+  })
 }
 
 onMounted(() => {

@@ -10,17 +10,6 @@
       </div>
 
       <form @submit.prevent="handleCreate">
-        <!-- 创建者昵称 -->
-        <div class="form-group">
-          <label>你的昵称</label>
-          <input 
-            v-model="creatorNickname" 
-            type="text" 
-            placeholder="输入你的昵称" 
-            required 
-          />
-        </div>
-
         <!-- 房间基本信息 -->
         <div class="form-group">
           <label>房间名称 *</label>
@@ -91,9 +80,6 @@ const router = useRouter()
 const isLoading = ref(false)
 const errorMessage = ref('')
 
-// 从 localStorage 获取用户昵称（如果没有则使用默认值）
-const creatorNickname = ref(localStorage.getItem('userNickname') || '房主')
-
 const form = reactive({
   name: '',
   announcement: '',
@@ -101,7 +87,7 @@ const form = reactive({
   password: ''
 })
 
-const handleCreate = async () => {
+const handleCreate = () => {
   // 验证必填字段
   if (!form.name.trim()) {
     errorMessage.value = '房间名称不能为空'
@@ -118,54 +104,18 @@ const handleCreate = async () => {
     return
   }
 
-  isLoading.value = true
-  errorMessage.value = ''
-
-  try {
-    const response = await roomApi.create({
+  // 不在这里调用后端，而是跳转到 RoomView，由 RoomView 弹出昵称输入框后再创建
+  router.push({
+    name: 'room',
+    params: { id: 'new' },
+    query: {
+      mode: 'create',
       name: form.name,
-      capacity: form.capacity,
-      password: form.password || undefined,
-      announcement: form.announcement || undefined,
-      creatorNickname: creatorNickname.value
-    })
-
-    if (response.data.success) {
-      const { room, creator } = response.data.data
-      
-      // 保存用户信息到本地存储，后续操作需要用到（creator.id 就是参与者ID）
-      localStorage.setItem('userId', creator.id)
-      localStorage.setItem('participantId', creator.id) // 明确保存 participantId
-      localStorage.setItem('userNickname', creator.nickname)
-      localStorage.setItem('currentRoomId', room.id)
-      
-      console.log('房间创建成功，房间号:', room.id)
-      
-      // 跳转到房间页
-      router.push({
-        name: 'room',
-        params: { id: room.id }
-      })
+      capacity: form.capacity.toString(),
+      password: form.password || '',
+      announcement: form.announcement || ''
     }
-  } catch (error: any) {
-    const errorCode = error.response?.data?.errorCode
-    const message = error.response?.data?.message || '创建房间失败，请重试'
-    
-    switch (errorCode) {
-      case 'VALIDATION_ERROR':
-        errorMessage.value = '参数验证失败：' + message
-        break
-      case 'BAD_REQUEST':
-        errorMessage.value = '请求参数错误：' + message
-        break
-      default:
-        errorMessage.value = message
-    }
-    
-    console.error('创建房间失败:', error)
-  } finally {
-    isLoading.value = false
-  }
+  })
 }
 </script>
 

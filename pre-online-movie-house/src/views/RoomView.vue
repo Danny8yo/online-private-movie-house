@@ -22,26 +22,38 @@
       </div>
     </div>
 
-    <!-- 模态框：输入昵称 -->
-    <div v-if="!username" class="modal-overlay">
+    <!-- 模态框：输入昵称（和密码，如需要） -->
+    <div v-if="showNicknameModal" class="modal-overlay">
       <div class="modal-content">
-        <h2>欢迎加入放映室</h2>
-        <p>请给自己起个名字吧</p>
-        <div class="input-row">
+        <h2>{{ isCreateMode ? '创建放映室' : '加入放映室' }}</h2>
+        <p>请输入你的昵称{{ needPassword ? '和房间密码' : '' }}</p>
+        <div class="input-column">
           <input 
-            v-model="tempUsername" 
+            v-model="tempNickname" 
             placeholder="你的昵称" 
-            @keyup.enter="confirmUsername"
+            @keyup.enter="confirmJoinOrCreate"
             ref="nameInput" 
             autofocus
           />
-          <button class="btn-primary" @click="confirmUsername">进入</button>
+          <input 
+            v-if="needPassword"
+            v-model="tempPassword" 
+            type="password"
+            placeholder="房间密码" 
+            @keyup.enter="confirmJoinOrCreate"
+          />
+          <div class="modal-actions">
+            <button class="btn-text" @click="cancelJoinOrCreate">取消</button>
+            <button class="btn-primary" @click="confirmJoinOrCreate" :disabled="isJoining">
+              {{ isJoining ? '处理中...' : (isCreateMode ? '创建并进入' : '加入房间') }}
+            </button>
+          </div>
         </div>
       </div>
     </div>
 
     <!-- 左侧：播放区域 -->
-    <div class="main-area" :class="{ blurred: !username }">
+    <div class="main-area" :class="{ blurred: showNicknameModal }">
       <header class="room-header">
         <div class="room-info">
           <h1>{{ roomInfo.name || '未命名房间' }}</h1>
@@ -163,11 +175,30 @@ import syncService, { type SyncEvent, type VideoState, type MemberEvent, type Ch
 
 const route = useRoute()
 const router = useRouter()
-const roomId = route.params.id as string
+const roomId = ref(route.params.id as string)
+
+// 判断模式：创建 or 加入
+const isCreateMode = computed(() => route.query.mode === 'create')
+const needPassword = computed(() => route.query.hasPassword === '1')
+
+// 创建模式下的房间配置（从 query 获取）
+const createConfig = computed(() => ({
+  name: route.query.name as string || '',
+  capacity: parseInt(route.query.capacity as string) || 10,
+  password: route.query.password as string || '',
+  announcement: route.query.announcement as string || ''
+}))
 
 // 从 localStorage 获取用户信息
 const userId = ref(localStorage.getItem('userId') || '')
 const userNickname = ref(localStorage.getItem('userNickname') || '')
+
+// 昵称/密码输入弹窗相关
+const showNicknameModal = ref(false)
+const tempNickname = ref('')
+const tempPassword = ref('')
+const isJoining = ref(false)
+const nameInput = ref<HTMLInputElement | null>(null)
 
 // 房间信息状态
 const roomInfo = reactive({
@@ -185,22 +216,128 @@ const participants = ref<Array<{id: string; nickname: string; role?: string; sta
 
 const isOwner = computed(() => roomInfo.creatorId === userId.value)
 
-// 用户名逻辑
-const username = ref(userNickname.value)
-const tempUsername = ref('')
-const nameInput = ref<HTMLInputElement | null>(null)
-
 // 片源设置逻辑
 const showVideoSettings = ref(false)
 const newVideoUrl = ref('')
 const videoInput = ref<HTMLInputElement | null>(null)
 const isUpdatingVideo = ref(false)
 
-const confirmUsername = () => {
-  if (!tempUsername.value.trim()) return
-  username.value = tempUsername.value
-  userNickname.value = tempUsername.value
-  localStorage.setItem('userNickname', username.value)
+// ==========================================
+// 昵称/密码弹窗确认逻辑
+// ==========================================
+const confirmJoinOrCreate = async () => {
+  if (!tempNickname.value.trim()) {
+    alert('请输入昵称')
+    return
+  }
+  
+  if (needPassword.value && !tempPassword.value.trim()) {
+    alert('请输入房间密码')
+    return
+  }
+
+  isJoining.value = true
+  
+  try {
+    if (isCreateMode.value) {
+      // 创建模式：调用后端创建房间
+      const response = await roomApi.create({
+        name: createConfig.value.name,
+        capacity: createConfig.value.capacity,
+        password: createConfig.value.password || undefined,
+        announcement: createConfig.value.announcement || undefined,
+        creatorNickname: tempNickname.value.trim()
+      })
+
+      if (response.data.success) {
+        const { room, creator } = response.data.data
+        
+        // 保存用户信息
+        localStorage.setItem('userId', creator.id)
+        localStorage.setItem('participantId', creator.id)
+        localStorage.setItem('userNickname', creator.nickname)
+        localStorage.setItem('currentRoomId', room.id)
+        
+        // 更新本地状态
+        userId.value = creator.id
+        userNickname.value = creator.nickname
+        roomId.value = room.id
+        
+        // 关闭弹窗，加载房间详情
+        showNicknameModal.value = false
+        
+        // 更新 URL（从 /room/new 变为 /room/实际ID）
+        router.replace({
+          name: 'room',
+          params: { id: room.id }
+        })
+        
+        await loadRoomDetail()
+      }
+    } else {
+      // 加入模式：调用后端加入房间
+      const response = await roomApi.join(roomId.value, {
+        nickname: tempNickname.value.trim(),
+        password: tempPassword.value || undefined
+      })
+
+      if (response.data.success) {
+        const { room, participant } = response.data.data
+        
+        // 保存用户信息
+        localStorage.setItem('userId', participant.id)
+        localStorage.setItem('participantId', participant.id)
+        localStorage.setItem('userNickname', tempNickname.value.trim())
+        localStorage.setItem('currentRoomId', room.id)
+        
+        // 更新本地状态
+        userId.value = participant.id
+        userNickname.value = tempNickname.value.trim()
+        
+        // 关闭弹窗，加载房间详情
+        showNicknameModal.value = false
+        await loadRoomDetail()
+      }
+    }
+  } catch (error: any) {
+    const errorCode = error.response?.data?.errorCode
+    const message = error.response?.data?.message || '操作失败，请重试'
+    
+    switch (errorCode) {
+      case 'ROOM_NOT_FOUND':
+        alert('房间不存在')
+        router.push('/join')
+        break
+      case 'ROOM_FULL':
+        alert('房间已满，无法加入')
+        router.push('/join')
+        break
+      case 'INVALID_PASSWORD':
+        alert('密码错误，请重试')
+        tempPassword.value = ''
+        break
+      case 'ROOM_CLOSED':
+        alert('房间已关闭')
+        router.push('/join')
+        break
+      default:
+        alert(message)
+    }
+    
+    console.error('加入/创建房间失败:', error)
+  } finally {
+    isJoining.value = false
+  }
+}
+
+const cancelJoinOrCreate = () => {
+  showNicknameModal.value = false
+  // 返回上一页
+  if (isCreateMode.value) {
+    router.push('/create')
+  } else {
+    router.push('/join')
+  }
 }
 
 const updateVideoSource = async () => {
@@ -278,7 +415,7 @@ const loadRoomDetail = async () => {
   errorMessage.value = ''
 
   try {
-    const response = await roomApi.getDetail(roomId)
+    const response = await roomApi.getDetail(roomId.value)
 
     if (response.data.success) {
       const room = response.data.data
@@ -296,12 +433,15 @@ const loadRoomDetail = async () => {
       // 添加系统消息
       messages.push({
         type: 'system',
-        content: `欢迎加入房间 #${roomId}`
+        content: `欢迎加入房间 #${roomId.value}`
       })
       messages.push({
         type: 'system',
         content: `房间成员：${room.currentCount} 人`
       })
+      
+      isConnected.value = true
+      connectedUsers.value = participants.value.length
 
       // 初始化同步服务
       await initSyncService(room.videoState)
@@ -369,7 +509,7 @@ const initSyncService = async (initialVideoState?: VideoState) => {
 
     // 加入同步频道（传入昵称以便广播）
     if (participantId.value) {
-      const result = await syncService.joinSyncChannel(roomId, participantId.value, userNickname.value)
+      const result = await syncService.joinSyncChannel(roomId.value, participantId.value, userNickname.value)
       syncConnected.value = true
 
       // 更新成员列表
@@ -378,9 +518,24 @@ const initSyncService = async (initialVideoState?: VideoState) => {
         connectedUsers.value = result.participants.length
       }
 
-      // 初始化播放器状态
-      if (result.videoState && playerRef.value) {
-        applyVideoState(result.videoState, result.serverTime)
+      // 【关键修复】观众初始化同步（状态对齐）
+      // 加入成功后，立即应用服务端返回的视频状态
+      if (result.videoState) {
+        console.log('[RoomView] 执行观众初始化同步，应用视频状态:', result.videoState)
+        
+        // 等待播放器准备好
+        await nextTick()
+        
+        // 延迟一小段时间确保播放器已初始化
+        setTimeout(() => {
+          if (playerRef.value && result.videoState) {
+            applyVideoState(result.videoState, result.serverTime)
+            messages.push({
+              type: 'system',
+              content: '已同步当前播放状态'
+            })
+          }
+        }, 500)
       }
 
       messages.push({
@@ -569,7 +724,10 @@ const handleSyncEvent = (event: SyncEvent) => {
 
 const leaveRoomAPI = async () => {
   try {
-    await roomApi.leave(roomId, userId.value)
+    // 只有已经加入房间（有有效的userId）才调用离开接口
+    if (userId.value && roomId.value && roomId.value !== 'new') {
+      await roomApi.leave(roomId.value, userId.value)
+    }
     localStorage.removeItem('currentRoomId')
     router.push('/join')
   } catch (error: any) {
@@ -579,17 +737,22 @@ const leaveRoomAPI = async () => {
 }
 
 onMounted(async () => {
-  if (!userId.value || !userNickname.value) {
-    alert('请先加入房间')
-    router.push('/join')
-    return
+  // 根据模式决定行为
+  if (isCreateMode.value || route.query.mode === 'join') {
+    // 创建模式或加入模式：弹出昵称输入框
+    showNicknameModal.value = true
+  } else {
+    // 直接进入模式（从其他地方跳转，已有用户信息）
+    if (!userId.value || !userNickname.value) {
+      alert('请先加入房间')
+      router.push('/join')
+      return
+    }
+    
+    await loadRoomDetail()
+    isConnected.value = true
+    connectedUsers.value = participants.value.length
   }
-
-  // participantId 从 userId 获取（已在 computed 中定义）
-
-  await loadRoomDetail()
-  isConnected.value = true
-  connectedUsers.value = participants.value.length
 })
 
 onUnmounted(() => {
@@ -711,7 +874,7 @@ const endSession = async () => {
   if (!confirm('确定要解散房间吗？所有成员将被移出。')) return
 
   try {
-    const response = await roomApi.dissolve(roomId, userId.value)
+    const response = await roomApi.dissolve(roomId.value, userId.value)
 
     if (response.data.success) {
       alert('房间已解散')
