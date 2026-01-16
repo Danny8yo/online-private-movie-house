@@ -130,7 +130,7 @@
         </div>
       </div>
 
-      <!-- 成员列表 (新增) -->
+      <!-- 成员列表 -->
       <div v-show="currentTab === 'members'" class="member-list">
         <div v-for="m in members" :key="m.id" class="member-item-row">
           <div class="avatar-placeholder">{{ m.avatar }}</div>
@@ -159,7 +159,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ArtPlayer from '../components/ArtPlayer.vue'
 import roomApi from '@/api/roomApi'
-import syncService, { type SyncEvent, type VideoState, type MemberEvent } from '@/services/syncService'
+import syncService, { type SyncEvent, type VideoState, type MemberEvent, type ChatMessage } from '@/services/syncService'
 
 const route = useRoute()
 const router = useRouter()
@@ -181,7 +181,7 @@ const roomInfo = reactive({
 })
 
 // 参与者列表
-const participants = ref<Array<{id: string; nickname: string; role: string; status: string}>>([])
+const participants = ref<Array<{id: string; nickname: string; role?: string; status?: string}>>([])
 
 const isOwner = computed(() => roomInfo.creatorId === userId.value)
 
@@ -260,7 +260,7 @@ const goBack = () => {
 const chatBox = ref<HTMLElement | null>(null)
 
 // 播放器引用
-const playerRef = ref<InstanceType<typeof ArtPlayer> | null>(null)
+const playerRef = ref<any>(null)
 
 // 同步控制相关
 const syncConnected = ref(false)
@@ -344,6 +344,11 @@ const initSyncService = async (initialVideoState?: VideoState) => {
     // 注册成员离开事件监听
     syncService.onMemberLeft((event: MemberEvent) => {
       handleMemberLeft(event)
+    })
+
+    // 注册聊天消息事件监听
+    syncService.onChatMessage((message: ChatMessage) => {
+      handleChatMessage(message)
     })
 
     // 等待连接建立
@@ -443,6 +448,23 @@ const handleMemberLeft = (event: MemberEvent) => {
   messages.push({
     type: 'system',
     content: `${event.participant.nickname} 离开了房间`
+  })
+  
+  scrollToBottom()
+}
+
+// 处理聊天消息事件
+const handleChatMessage = (message: ChatMessage) => {
+  console.log('[RoomView] 收到聊天消息:', message)
+  
+  // 判断是否为自己发送的消息
+  const isSelf = message.senderId === userId.value
+  
+  messages.push({
+    type: message.type,
+    sender: message.senderNickname,
+    content: message.content,
+    isSelf
   })
   
   scrollToBottom()
@@ -640,18 +662,38 @@ const forceSync = async () => {
 // ==========================================
 // 互动
 // ==========================================
-const sendMessage = () => {
-  if (!newMessage.value.trim()) return
+const isSendingMessage = ref(false)
 
-  messages.push({
-    type: 'chat',
-    sender: userNickname.value,
-    content: newMessage.value,
-    isSelf: true
-  })
+const sendMessage = async () => {
+  const content = newMessage.value.trim()
+  if (!content) return
+  
+  // 防止重复发送
+  if (isSendingMessage.value) return
+  
+  // 检查连接状态
+  if (!syncConnected.value) {
+    alert('未连接到房间，无法发送消息')
+    return
+  }
 
-  newMessage.value = ''
-  scrollToBottom()
+  isSendingMessage.value = true
+  const messageContent = newMessage.value
+  newMessage.value = '' // 立即清空输入框
+
+  try {
+    await syncService.sendChatMessage(messageContent)
+    // 消息发送成功后，通过 chat:message 事件统一处理显示
+    // 服务端会广播给所有人（包括自己）
+  } catch (error: any) {
+    // 发送失败，恢复输入框内容
+    newMessage.value = messageContent
+    console.error('发送消息失败:', error)
+    // 可选：显示错误提示
+    // alert('发送消息失败：' + (error.message || '未知错误'))
+  } finally {
+    isSendingMessage.value = false
+  }
 }
 
 const scrollToBottom = () => {

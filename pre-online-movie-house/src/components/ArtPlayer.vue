@@ -5,7 +5,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue';
 import Artplayer from 'artplayer';
-import type ArtplayerType from 'artplayer/types/artplayer';
 
 const props = defineProps<{
   src: string;
@@ -30,7 +29,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: 'ready', instance: ArtplayerType): void;
+  (e: 'ready', instance: any): void;
   (e: 'play'): void;
   (e: 'pause'): void;
   (e: 'seek', progress: number): void;
@@ -39,7 +38,7 @@ const emit = defineEmits<{
 }>();
 
 const artRef = ref<HTMLDivElement | null>(null);
-let instance: ArtplayerType | null = null;
+let instance: any = null;
 let isSyncControlled = ref(false); // 标记是否正在执行同步操作，避免循环触发
 
 // 暴露给父组件的方法
@@ -156,7 +155,7 @@ onMounted(() => {
       setting: true,
       playbackRate: true,
       playsInline: true,
-    }) as ArtplayerType;
+    }) as any;
 
     // 监听播放器事件
     instance.on('play', () => {

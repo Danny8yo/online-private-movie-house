@@ -91,6 +91,20 @@ export type ErrorCallback = (error: { code: string; message: string }) => void
 export type MemberJoinedCallback = (event: MemberEvent) => void
 export type MemberLeftCallback = (event: MemberEvent) => void
 
+// 聊天消息接口
+export interface ChatMessage {
+  id: string
+  roomId: string
+  senderId: string
+  senderNickname: string
+  content: string
+  type: 'chat' | 'system'
+  timestamp: number
+}
+
+// 聊天消息回调函数类型
+export type ChatMessageCallback = (message: ChatMessage) => void
+
 class SyncService {
   private socket: Socket | null = null
   private roomId: string = ''
@@ -101,6 +115,7 @@ class SyncService {
   private errorCallbacks: Set<ErrorCallback> = new Set()
   private memberJoinedCallbacks: Set<MemberJoinedCallback> = new Set()
   private memberLeftCallbacks: Set<MemberLeftCallback> = new Set()
+  private chatMessageCallbacks: Set<ChatMessageCallback> = new Set()
 
   /**
    * 连接同步控制服务
@@ -156,6 +171,12 @@ class SyncService {
     this.socket.on('member:left', (event: MemberEvent) => {
       console.log('[SyncService] 收到成员离开事件:', event)
       this.notifyMemberLeft(event)
+    })
+
+    // 监听聊天消息事件
+    this.socket.on('chat:message', (message: ChatMessage) => {
+      console.log('[SyncService] 收到聊天消息:', message)
+      this.notifyChatMessage(message)
     })
   }
 
@@ -280,6 +301,40 @@ class SyncService {
   }
 
   /**
+   * 发送聊天消息
+   */
+  sendChatMessage(content: string): Promise<ChatMessage> {
+    return new Promise((resolve, reject) => {
+      if (!this.socket?.connected) {
+        reject(new Error('Socket 未连接'))
+        return
+      }
+
+      if (!this.roomId) {
+        reject(new Error('未加入房间'))
+        return
+      }
+
+      this.socket.emit(
+        'chat:send',
+        { content },
+        (ack: AckResponse) => {
+          if (!ack?.ok) {
+            const error = ack?.error || {
+              code: 'UNKNOWN_ERROR',
+              message: ack?.message || '发送消息失败'
+            }
+            this.notifyError(error)
+            reject(new Error(error.message))
+            return
+          }
+          resolve(ack.data?.message)
+        }
+      )
+    })
+  }
+
+  /**
    * 发送同步命令的通用方法
    */
   private emitSyncCommand(
@@ -358,6 +413,16 @@ class SyncService {
   }
 
   /**
+   * 注册聊天消息监听器
+   */
+  onChatMessage(callback: ChatMessageCallback): () => void {
+    this.chatMessageCallbacks.add(callback)
+    return () => {
+      this.chatMessageCallbacks.delete(callback)
+    }
+  }
+
+  /**
    * 通知所有事件监听器
    */
   private notifyEvent(event: SyncEvent): void {
@@ -410,6 +475,19 @@ class SyncService {
   }
 
   /**
+   * 通知所有聊天消息监听器
+   */
+  private notifyChatMessage(message: ChatMessage): void {
+    this.chatMessageCallbacks.forEach(callback => {
+      try {
+        callback(message)
+      } catch (error) {
+        console.error('[SyncService] 聊天消息回调执行错误:', error)
+      }
+    })
+  }
+
+  /**
    * 离开同步频道
    */
   leave(): void {
@@ -430,6 +508,7 @@ class SyncService {
     this.errorCallbacks.clear()
     this.memberJoinedCallbacks.clear()
     this.memberLeftCallbacks.clear()
+    this.chatMessageCallbacks.clear()
     if (this.socket) {
       this.socket.disconnect()
       this.socket = null
