@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * @file 应用入口文件
  * @description Express应用的主入口，负责初始化和配置整个应用

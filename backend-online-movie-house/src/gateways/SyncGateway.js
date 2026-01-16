@@ -2,11 +2,13 @@
  * @file 同步控制Socket网关
  * @description 处理视频同步控制的Socket.IO事件，负责接收客户端同步控制请求并广播同步事件
  *              同时处理成员加入/离开事件的广播，实现房间成员列表的实时更新
+ *              并处理房间内的聊天消息收发
  * @module gateways/SyncGateway
  */
 
 const SyncService = require('../services/SyncService');
 const RoomService = require('../services/RoomService');
+const ChatService = require('../services/ChatService');
 const {
   RoomNotFoundException,
   RoomClosedException,
@@ -31,6 +33,7 @@ class SyncGateway {
     this.io = io;
     this.syncService = SyncService.getInstance();
     this.roomService = RoomService.getInstance();
+    this.chatService = ChatService.getInstance();
     this.namespace = io.of('/sync');
     
     // 存储 socket.id 与 { roomId, participantId, nickname } 的映射关系
@@ -56,6 +59,7 @@ class SyncGateway {
       this.handleChangeSubtitle(socket);
       this.handleChangeSource(socket);
       this.handleInitRequest(socket);
+      this.handleChat(socket);
 
       // 处理断开连接
       socket.on('disconnect', () => {
@@ -563,6 +567,57 @@ class SyncGateway {
         });
 
         console.log(`[SyncGateway] 房间 ${roomId} 初始化状态请求`);
+      } catch (error) {
+        this.handleError(socket, error, ack);
+      }
+    });
+  }
+
+  /**
+   * 处理聊天消息发送
+   * 
+   * @param {Object} socket - Socket连接实例
+   */
+  handleChat(socket) {
+    socket.on('chat:send', async (data, ack) => {
+      try {
+        const { content } = data;
+
+        // 从 socket 映射获取发送者信息
+        const participantInfo = this.socketParticipantMap.get(socket.id);
+        
+        if (!participantInfo) {
+          return ack({
+            ok: false,
+            error: {
+              code: 'NOT_IN_ROOM',
+              message: '您尚未加入房间，无法发送消息'
+            }
+          });
+        }
+
+        const { roomId, participantId, nickname } = participantInfo;
+
+        // 创建消息（内部会验证内容和频率限制）
+        const message = this.chatService.createMessage(
+          roomId,
+          participantId,
+          nickname,
+          content
+        );
+
+        // 广播消息给房间内所有成员（包括发送者）
+        this.broadcastToRoom(roomId, 'chat:message', message.toJSON());
+
+        // 返回成功响应
+        ack({
+          ok: true,
+          data: {
+            message: message.toJSON()
+          }
+        });
+
+        console.log(`[SyncGateway] 用户 ${nickname} 在房间 ${roomId} 发送消息`);
       } catch (error) {
         this.handleError(socket, error, ack);
       }

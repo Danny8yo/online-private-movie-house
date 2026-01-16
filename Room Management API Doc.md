@@ -64,7 +64,155 @@
 | 410 | ROOM_CLOSED | 房间已关闭 |
 | 500 | INTERNAL_SERVER_ERROR | 服务器内部错误 |
 
+---
 
+## Socket.IO 实时接口（聊天功能）
+
+本章节描述在线观影室的**实时聊天功能**接口规范，基于 Socket.IO 实现。聊天功能已集成在同步控制子系统中，使用相同的命名空间。
+
+### 连接信息
+
+- **Socket 服务地址**：与 HTTP 服务同源（例如 `http://localhost:3000`）
+- **Namespace**：`/sync`（与同步控制共享同一命名空间）
+- **Room Channel（服务器内部分组）**：`room:{roomId}`
+
+> 说明：聊天功能强绑定房间，使用聊天功能前必须先通过 REST API 加入房间（`POST /api/rooms/:roomId/join`）获取 `participantId`，并通过 `sync:join` 事件加入同步频道。
+
+### ACK（回执）格式
+
+所有客户端 → 服务端事件都使用 ACK（回调函数）作为统一的成功/失败返回，格式与同步控制子系统相同。
+
+### 聊天错误码
+
+Socket.IO 的错误码与 HTTP 错误码保持同一套语义（便于前后端统一处理）。建议使用以下错误码：
+
+| 错误码 | 说明 | 常见触发场景 |
+|--------|------|--------------|
+| VALIDATION_ERROR | 参数验证失败 | content 缺失或非法 |
+| ROOM_NOT_FOUND | 房间不存在 | 房间ID无效 |
+| ROOM_CLOSED | 房间已关闭 | 房间已解散/关闭 |
+| NOT_IN_ROOM | 不在房间内 | 未加入房间就尝试聊天，或已退出仍发送 |
+| INTERNAL_SERVER_ERROR | 服务器内部错误 | 未捕获异常 |
+
+---
+
+### 事件：发送聊天消息
+
+向当前房间发送一条聊天消息。服务端会验证消息内容、频率限制，并广播给房间内所有成员。
+
+**事件名（Client → Server）**：`chat:send`
+
+**请求参数**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| content | string | 是 | 消息内容，1-500字符 |
+
+> **注意**：发送者信息（roomId、participantId、nickname）会自动从 Socket 连接上下文中获取，无需在请求参数中传递。
+
+**ACK 返回 data**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| message | object | 发送成功的消息对象 |
+
+**消息对象结构**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | string | 消息ID（服务端生成，用于去重） |
+| roomId | string | 房间ID |
+| senderId | string | 发送者参与者ID |
+| senderNickname | string | 发送者昵称 |
+| content | string | 消息内容 |
+| type | string | 消息类型（chat/system） |
+| timestamp | number | 发送时间戳（毫秒） |
+
+---
+
+### 事件：接收聊天消息（广播）
+
+服务端向房间内所有客户端广播新消息。
+
+**事件名（Server → Client）**：`chat:message`
+
+**消息体**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | string | 消息ID |
+| roomId | string | 房间ID |
+| senderId | string | 发送者参与者ID |
+| senderNickname | string | 发送者昵称 |
+| content | string | 消息内容 |
+| type | string | 消息类型（chat/system） |
+| timestamp | number | 发送时间戳（毫秒） |
+
+**消息示例**
+
+```json
+{
+  "id": "msg_1234567890",
+  "roomId": "123456",
+  "senderId": "550e8400-e29b-41d4-a716-446655440000",
+  "senderNickname": "影迷小李",
+  "content": "大家好，这部电影真好看！",
+  "type": "chat",
+  "timestamp": 1736899200000
+}
+```
+
+---
+
+### 前端调用示例（Socket.IO 聊天功能）
+
+> 以下展示聊天功能的完整使用流程。注意：聊天功能与同步控制共享同一 Socket 连接。
+
+```javascript
+import { io } from 'socket.io-client';
+
+// 1) 连接同步控制命名空间（同时支持聊天功能）
+const syncSocket = io('http://localhost:3000/sync', {
+  transports: ['websocket']
+});
+
+// 2) 加入同步频道（必须先通过 REST API 加入房间获取 participantId）
+// 加入成功后，自动获得聊天功能
+syncSocket.emit('sync:join', {
+  roomId: '123456',
+  participantId: '550e8400-e29b-41d4-a716-446655440000',
+  nickname: '影迷小李'
+}, (ack) => {
+  if (!ack?.ok) {
+    console.error('加入同步频道失败:', ack?.error?.message);
+    return;
+  }
+  console.log('加入同步频道成功，聊天功能已启用');
+});
+
+// 3) 监听聊天消息
+syncSocket.on('chat:message', (message) => {
+  console.log(`[${new Date(message.timestamp).toLocaleTimeString()}] ${message.senderNickname}: ${message.content}`);
+});
+
+// 4) 发送聊天消息
+const sendMessage = (content) => {
+  syncSocket.emit('chat:send', {
+    content: content
+  }, (ack) => {
+    if (!ack?.ok) {
+      console.error('发送失败:', ack?.error?.message);
+      return;
+    }
+    console.log('发送成功:', ack.data.message);
+  });
+};
+
+// 使用示例
+sendMessage('大家好，这部电影真好看！');
+```
+
+---
 
 ## Socket.IO 实时接口（同步控制子系统）
 
@@ -96,7 +244,7 @@
 
 ### 事件：加入同步频道
 
-客户端加入某个房间的同步控制频道（Socket.IO room），并获取当前视频状态。成功加入后，服务端会自动向房间内其他成员广播 `member:joined` 事件。
+客户端加入某个房间的同步控制频道（Socket.IO room），并获取当前视频状态。加入成功后，服务端会向房间内其他成员广播 `member:joined` 事件。
 
 **事件名（Client → Server）**：`sync:join`
 
@@ -106,7 +254,7 @@
 |------|------|------|------|
 | roomId | string | 是 | 房间ID（6位房间号） |
 | participantId | string | 是 | 参与者ID（由加入房间 API 返回） |
-| nickname | string | 否 | 用户昵称（用于广播成员加入事件，如不提供则使用"匿名用户"） |
+| nickname | string | 否 | 用户昵称（用于广播给其他成员，建议填写） |
 
 **ACK 返回 data**
 
@@ -116,6 +264,29 @@
 | videoState | object | 当前视频状态（包含 source、status、progress、playbackRate、subtitle 等） |
 | serverTime | number | 服务端时间戳（毫秒） |
 | participants | array | 当前房间的完整成员列表 |
+
+---
+
+### 事件：离开同步频道
+
+客户端主动离开同步控制频道。离开后，服务端会向房间内其他成员广播 `member:left` 事件。
+
+**事件名（Client → Server）**：`sync:leave`
+
+**请求参数**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| roomId | string | 是 | 房间ID |
+| participantId | string | 是 | 参与者ID |
+
+**ACK 返回 data**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| message | string | 操作结果消息 |
+
+> **说明**：当 Socket 连接断开时，服务端会自动执行离开逻辑并广播 `member:left` 事件，无需客户端显式调用。
 
 ---
 
@@ -401,8 +572,7 @@ const syncSocket = io('http://localhost:3000/sync', {
 // 2) 加入同步频道（必须先通过 REST API 加入房间获取 participantId）
 syncSocket.emit('sync:join', {
   roomId: '123456',
-  participantId: '550e8400-e29b-41d4-a716-446655440000',
-  nickname: '房主小明'  // 可选参数，用于广播成员加入事件
+  participantId: '550e8400-e29b-41d4-a716-446655440000'
 }, (ack) => {
   if (!ack?.ok) {
     console.error('加入同步频道失败:', ack?.error?.message);
@@ -411,10 +581,8 @@ syncSocket.emit('sync:join', {
   console.log('加入同步频道成功:', ack.data);
   
   // 初始化视频播放器
-  const { videoState, serverTime, participants } = ack.data;
+  const { videoState, serverTime } = ack.data;
   initializePlayer(videoState, serverTime);
-  // 可以更新成员列表显示
-  updateParticipantsList(participants);
 });
 
 // 3) 监听同步事件（所有成员都会收到）
@@ -455,20 +623,7 @@ syncSocket.on('sync:event', (event) => {
   }
 });
 
-// 4) 监听成员加入/离开事件
-syncSocket.on('member:joined', (event) => {
-  console.log('成员加入:', event.participant.nickname);
-  // 更新成员列表显示
-  updateParticipantsList(event.participants);
-});
-
-syncSocket.on('member:left', (event) => {
-  console.log('成员离开:', event.participant.nickname);
-  // 更新成员列表显示
-  updateParticipantsList(event.participants);
-});
-
-// 5) 房间创建者执行同步控制操作
+// 4) 房间创建者执行同步控制操作
 const playVideo = () => {
   syncSocket.emit('sync:play', {
     roomId: '123456',
@@ -509,7 +664,7 @@ const seekVideo = (progress) => {
   });
 };
 
-// 6) 监听视频播放器的进度跳转事件（仅房主需要）
+// 5) 监听视频播放器的进度跳转事件（仅房主需要）
 // 当房主在播放器中拖动进度条或跳转时，自动触发全员同步
 // 注意：isSyncingSeek 标志位已在步骤3中定义
 
@@ -703,12 +858,27 @@ const createRoom = async () => {
 
 ### 2. 获取房间列表
 
-获取所有可用房间的列表。
+获取所有可用房间的列表，支持分页和搜索。
 
 **请求**
 
 ```
 GET /api/rooms
+```
+
+**查询参数**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| keyword | string | 否 | 搜索关键词，匹配房间名称或房间号 |
+| status | string | 否 | 房间状态过滤：waiting, playing |
+| page | number | 否 | 页码，默认1 |
+| pageSize | number | 否 | 每页数量，默认20 |
+
+**请求示例**
+
+```
+GET /api/rooms?keyword=观影&status=waiting&page=1&pageSize=10
 ```
 
 **响应示例**
@@ -740,7 +910,13 @@ GET /api/rooms
         "creatorNickname": "影迷小李",
         "createTime": "2026-01-13T09:30:00.000Z"
       }
-    ]
+    ],
+    "pagination": {
+      "page": 1,
+      "pageSize": 10,
+      "total": 2,
+      "totalPages": 1
+    }
   },
   "timestamp": "2026-01-13T10:30:00.000Z"
 }
@@ -751,13 +927,20 @@ GET /api/rooms
 ```javascript
 import axios from 'axios';
 
-const getRoomList = async () => {
+const getRoomList = async (keyword = '', page = 1) => {
   try {
-    const response = await axios.get('http://localhost:3000/api/rooms');
+    const response = await axios.get('http://localhost:3000/api/rooms', {
+      params: {
+        keyword,
+        page,
+        pageSize: 10
+      }
+    });
     
     if (response.data.success) {
-      const { list } = response.data.data;
+      const { list, pagination } = response.data.data;
       console.log('房间列表:', list);
+      console.log('分页信息:', pagination);
       return response.data.data;
     }
   } catch (error) {
@@ -1360,7 +1543,7 @@ apiClient.interceptors.response.use(
 // 房间相关API
 export const roomApi = {
   // 获取房间列表
-  getList: () => apiClient.get('/rooms'),
+  getList: (params) => apiClient.get('/rooms', { params }),
   
   // 获取房间详情
   getDetail: (roomId) => apiClient.get(`/rooms/${roomId}`),
@@ -1383,7 +1566,7 @@ export const roomApi = {
   update: (roomId, data) => apiClient.patch(`/rooms/${roomId}`, data),
   
   // 验证密码
-  verifyPassword: (roomId, password) =>
+  verifyPassword: (roomId, password) => 
     apiClient.post(`/rooms/${roomId}/verify-password`, { password }),
   
   // 获取统计信息
@@ -1418,7 +1601,7 @@ export default {
     
     const loadRooms = async () => {
       try {
-        const response = await roomApi.getList();
+        const response = await roomApi.getList({ page: 1, pageSize: 20 });
         rooms.value = response.data.data.list;
       } catch (error) {
         console.error('加载房间列表失败');

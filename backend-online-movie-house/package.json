@@ -6,6 +6,9 @@
   "author": "",
   "type": "commonjs",
   "main": "src/app.js",
+  "bin": {
+    "backend-online-movie-house": "src/app.js"
+  },
   "scripts": {
     "start": "node src/app.js",
     "dev": "node --watch src/app.js",
@@ -17,5 +20,15 @@
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "pkg": {
+    "assets": [
+      "src/**/*.js",
+      "src/**/*.json"
+    ],
+    "targets": [
+      "node18-win-x64"
+    ],
+    "outputPath": "dist"
   }
 }

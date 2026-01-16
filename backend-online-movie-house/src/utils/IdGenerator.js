@@ -67,6 +67,21 @@ class IdGenerator {
     const randomPart = Math.random().toString(36).substring(2, 8);
     return `${timestamp}-${randomPart}`;
   }
+
+  /**
+   * 生成消息ID
+   * 结合时间戳和随机字符串生成聊天消息唯一ID
+   * 
+   * @static
+   * @returns {string} 消息ID
+   * @example
+   * const msgId = IdGenerator.generateMessageId(); // "msg-lz5abc12-x7y8z9"
+   */
+  static generateMessageId() {
+    const timestamp = Date.now().toString(36);
+    const randomPart = Math.random().toString(36).substring(2, 8);
+    return `msg-${timestamp}-${randomPart}`;
+  }
 }
 
 module.exports = IdGenerator;
